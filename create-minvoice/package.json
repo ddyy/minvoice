@@ -1,0 +1,17 @@
+{
+  "name": "create-minvoice",
+  "version": "0.1.0",
+  "description": "Scaffold a self-hosted Minvoice deployment — minimal invoicing on Cloudflare Workers",
+  "bin": { "create-minvoice": "./index.mjs" },
+  "type": "module",
+  "files": ["index.mjs"],
+  "engines": { "node": ">=18" },
+  "keywords": ["invoicing", "cloudflare-workers", "cloudflare-d1", "stripe", "paypal", "self-hosted"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ddyy/minvoice.git",
+    "directory": "create-minvoice"
+  },
+  "homepage": "https://minvoice.dev",
+  "license": "MIT"
+}

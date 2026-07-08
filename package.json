@@ -1,0 +1,60 @@
+{
+  "name": "minvoice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal single-business invoicing on Cloudflare Workers — Stripe & PayPal, PDF invoices, payment reminders. One-click deploy, no monthly fees.",
+  "license": "MIT",
+  "homepage": "https://minvoice.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ddyy/minvoice.git"
+  },
+  "keywords": [
+    "invoicing",
+    "invoice-generator",
+    "cloudflare-workers",
+    "cloudflare-d1",
+    "hono",
+    "stripe",
+    "paypal",
+    "self-hosted",
+    "serverless"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler d1 migrations apply DB --remote && wrangler deploy",
+    "promote": "git push origin main:prod",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "test": "vitest run",
+    "deploy:test": "wrangler d1 migrations apply DB --remote --env test && wrangler deploy --env test",
+    "db:migrate:test": "wrangler d1 migrations apply DB --remote --env test",
+    "db:wipe:local": "wrangler d1 execute DB --local --file scripts/wipe-data.sql",
+    "db:wipe:test": "wrangler d1 execute DB --remote --env test --file scripts/wipe-data.sql",
+    "db:wipe:prod": "wrangler d1 execute DB --remote --file scripts/wipe-data.sql",
+    "db:reset:local": "wrangler d1 execute DB --local --file scripts/reset-env.sql",
+    "db:reset:test": "wrangler d1 execute DB --remote --env test --file scripts/reset-env.sql",
+    "db:reset:prod": "wrangler d1 execute DB --remote --file scripts/reset-env.sql"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "jose": "^5.9.0",
+    "pdf-lib": "^1.17.1",
+    "stripe": "^17.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.9",
+    "wrangler": "^4.0.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "ADMIN_PASSWORD": {
+        "description": "Password for /admin until you configure Cloudflare Access (which disables it automatically). Pick something long."
+      }
+    }
+  }
+}

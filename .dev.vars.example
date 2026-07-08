@@ -1,0 +1,28 @@
+# Copy to .dev.vars for local development (uncomment what you need).
+# Never commit .dev.vars.
+#
+# NOTE: the Deploy to Cloudflare button prompts for every UNCOMMENTED entry
+# as a required secret — so only the true first-deploy requirement is active.
+# Add the rest later: npx wrangler secret put NAME (or Worker → Settings →
+# Variables in the dashboard). The app hides pay buttons and shows dashboard
+# warnings until they exist.
+
+# Admin login until Cloudflare Access is configured (Access disables it)
+ADMIN_PASSWORD=
+
+# ---- Payments: add when ready ----
+# STRIPE_SECRET_KEY=
+# STRIPE_WEBHOOK_SECRET=
+# PAYPAL_CLIENT_ID=
+# PAYPAL_CLIENT_SECRET=
+# PAYPAL_WEBHOOK_ID=
+
+# ---- Email via Resend (Settings -> Email provider) ----
+# RESEND_API_KEY=
+
+# ---- Local development only ----
+# (DEV_BYPASS_ACCESS is hostname-gated to localhost in code — it cannot
+# disable auth on a deployed Worker even if set by mistake)
+# DEV_BYPASS_ACCESS=true
+# APP_BASE_URL=http://localhost:8787
+# PAYPAL_API_BASE=https://api-m.sandbox.paypal.com

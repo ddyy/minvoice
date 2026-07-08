@@ -1,0 +1,31 @@
+// Zero-config deployment: works as-is on workers.dev (and with the Deploy to
+// Cloudflare button, which provisions the D1 database and rewrites its id).
+// For a custom domain, Cloudflare Access, the Cloudflare email binding, or a
+// staging environment, graft the relevant blocks from wrangler.jsonc.example.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "minvoice",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "minvoice",
+      // manual setup: npx wrangler d1 create minvoice → paste the id it prints
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  // No vars needed for the starter: APP_BASE_URL falls back to the request
+  // origin, and the PayPal live/sandbox choice lives in Settings.
+  "observability": {
+    "enabled": true
+  },
+  // Daily overdue-reminder check (15:00 UTC). Does nothing unless payment
+  // reminders are switched on in Settings → Email.
+  "triggers": { "crons": ["0 15 * * *"] }
+}

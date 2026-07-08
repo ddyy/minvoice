@@ -1,0 +1,1586 @@
+/* ==========================================================================
+   Minvoice — "Ledger"
+   Fine accounting stationery: warm paper, ink, hunter green, hairline rules,
+   tabular numerals. Fraunces (display) + Instrument Sans (UI).
+   ========================================================================== */
+
+/* Self-hosted variable fonts (latin subsets) — keeps the render path
+   same-origin; Google Fonts was ~800ms of blocking on throttled mobile. */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/fraunces.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Fraunces';
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/fraunces-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/instrument-sans.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Sans';
+  font-style: italic;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/instrument-sans-italic.woff2') format('woff2');
+}
+
+:root {
+  --paper: #f6f4ee;
+  --surface: #fffefb;
+  --ink: #1d1a15;
+  --ink-soft: #6b6459;
+  --ink-faint: #756e61;
+  --line: #e6e1d6;
+  --line-strong: #cfc7b8;
+  --green: #1e5b43;
+  --green-deep: #144532;
+  --green-tint: #e9f0eb;
+  --amber: #8a6510;
+  --amber-tint: #f6eeda;
+  --rust: #a8402a;
+  --rust-tint: #f7e9e4;
+  --stone: #6b655a; /* 4.8:1 on stone-tint — badge text passes WCAG AA */
+  --stone-tint: #edeae2;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 1px 2px rgba(29, 26, 21, 0.05), 0 4px 16px rgba(29, 26, 21, 0.05);
+  --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-ui: 'Instrument Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The hidden attribute must always win — author display rules (.btn etc.)
+   otherwise override the UA's low-priority [hidden] { display: none } */
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Barely-there paper grain */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+main {
+  position: relative;
+  z-index: 1;
+}
+
+/* Kill the UA form margin — forms wrap single action buttons all over the app */
+form {
+  margin: 0;
+}
+
+a {
+  color: var(--green);
+  text-decoration: none;
+  transition: color 140ms ease;
+}
+
+a:hover {
+  color: var(--green-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+h2 {
+  font-size: 19px;
+  margin: 0 0 14px;
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.site-footer {
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  padding: 0 24px 28px;
+}
+
+.site-footer a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.site-footer a:hover {
+  color: var(--ink-soft);
+}
+
+/* --------------------------------------------------------------------------
+   Header
+   -------------------------------------------------------------------------- */
+
+.site-header {
+  position: relative;
+  z-index: 30; /* above main (z-1) so the mobile nav panel paints over content */
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--paper);
+  margin-bottom: 40px;
+}
+
+.site-header .container {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 20px;
+  padding-bottom: 18px;
+}
+
+.site-brand {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+.site-brand:hover {
+  color: var(--green);
+  text-decoration: none;
+}
+
+.site-nav {
+  display: flex;
+  gap: 26px;
+}
+
+.site-nav a {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding-bottom: 19px;
+  margin-bottom: -19px;
+  border-bottom: 2px solid transparent;
+}
+
+.site-nav a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.site-nav a.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+
+.site-nav a.logout {
+  color: var(--ink-faint);
+  position: relative;
+  padding-left: 22px;
+}
+
+/* Text-height divider — a border would stretch down the underline padding */
+.site-nav a.logout::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 3px;
+  height: 13px;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+.site-nav a.logout:hover {
+  color: var(--rust);
+}
+
+/* Hamburger — hidden on desktop */
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 36px;
+  padding: 8px;
+  background: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.nav-toggle span {
+  display: block;
+  height: 2px;
+  background: var(--ink);
+  border-radius: 2px;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.nav-toggle.open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+
+.nav-toggle.open span:nth-child(2) {
+  opacity: 0;
+}
+
+.nav-toggle.open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* --------------------------------------------------------------------------
+   Page head
+   -------------------------------------------------------------------------- */
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 26px;
+}
+
+.page-title {
+  font-size: 30px;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* --------------------------------------------------------------------------
+   Filter tabs
+   -------------------------------------------------------------------------- */
+
+.filter-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.filter-bar .filter-tabs {
+  margin-bottom: 0;
+}
+
+.client-filter select {
+  width: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 5px 10px;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.filter-tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 5px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.filter-tabs a:hover {
+  color: var(--ink);
+  border-color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.filter-tabs a.active {
+  color: #fdfdf9;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.filter-count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+  background: var(--stone-tint);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.filter-tabs a.active .filter-count {
+  color: var(--green-tint);
+  background: var(--green-deep);
+}
+
+/* --------------------------------------------------------------------------
+   Cards — staggered rise on load
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 26px 28px;
+  box-shadow: var(--shadow);
+  margin-bottom: 22px;
+}
+
+/* The card's padding is the spacing — children don't add their own tail margin
+   (default <p> margins, table margins, etc.) */
+.card > :last-child {
+  margin-bottom: 0;
+}
+
+/* Entrance animation on the public pay shell only — admin views render instantly. */
+.pay-wrap > * {
+  /* backwards (not both): elements end in their natural state, so finished
+     animations are released — `both` pins them alive forever, which costs the
+     compositor and wedges anything waiting for page quiescence */
+  animation: rise 480ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.pay-wrap > *:nth-child(2) { animation-delay: 40ms; }
+.pay-wrap > *:nth-child(3) { animation-delay: 90ms; }
+.pay-wrap > *:nth-child(4) { animation-delay: 140ms; }
+.pay-wrap > *:nth-child(5) { animation-delay: 190ms; }
+.pay-wrap > *:nth-child(6) { animation-delay: 240ms; }
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Tables — the ledger itself
+   -------------------------------------------------------------------------- */
+
+table.table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  margin-bottom: 22px;
+}
+
+table.table th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-faint);
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid var(--line-strong);
+  background: var(--surface);
+}
+
+table.table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle; /* text cells center against taller controls (note editor, buttons) */
+}
+
+/* Inside a card, the card's own padding provides the bottom spacing */
+.card table.table:last-child {
+  margin-bottom: 0;
+}
+
+/* Timestamps stay on one line (payments table) */
+table.table td[data-label='Date'] {
+  white-space: nowrap;
+}
+
+/* Qty/unit are supporting math — the amount column carries the row */
+td.item-dim {
+  color: var(--ink-soft);
+}
+
+table.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+table.table tbody tr {
+  transition: background 120ms ease;
+}
+
+table.table tbody tr:hover {
+  background: #faf8f2;
+}
+
+table.table tbody tr[data-href] {
+  cursor: pointer;
+}
+
+.text-right,
+table.table th.text-right,
+table.table td.text-right {
+  text-align: right;
+}
+
+/* --------------------------------------------------------------------------
+   Badges — inked stamps
+   -------------------------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 9px 2px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.badge-draft {
+  color: var(--stone);
+  background: var(--stone-tint);
+  border-color: #ddd8cc;
+}
+
+.badge-sent {
+  color: var(--amber);
+  background: var(--amber-tint);
+  border-color: #e8d9b4;
+}
+
+.badge-paid {
+  color: var(--green);
+  background: var(--green-tint);
+  border-color: #cfdfd4;
+}
+
+.badge-void {
+  color: var(--stone);
+  background: transparent;
+  border-color: var(--line-strong);
+  text-decoration: line-through;
+}
+
+.badge-overdue {
+  color: #fff;
+  background: var(--rust);
+  border-color: var(--rust);
+}
+
+/* --------------------------------------------------------------------------
+   Forms
+   -------------------------------------------------------------------------- */
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+  flex: 1;
+}
+
+.form-group label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.form-group .muted {
+  font-size: 12.5px;
+}
+
+.form-row {
+  display: flex;
+  gap: 18px;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  width: 100%;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: none;
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(30, 91, 67, 0.18);
+}
+
+a:focus-visible,
+button:focus-visible {
+  border-radius: var(--radius-sm);
+}
+
+input.field-invalid,
+select.field-invalid,
+textarea.field-invalid {
+  border-color: var(--rust);
+  box-shadow: 0 0 0 3px rgba(168, 64, 42, 0.14);
+}
+
+input[readonly] {
+  background: var(--stone-tint);
+  color: var(--ink-soft);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ink-faint);
+}
+
+/* --------------------------------------------------------------------------
+   Line-items editor
+   -------------------------------------------------------------------------- */
+
+.items-editor {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.items-editor th {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--ink-faint);
+  padding: 0 8px 8px 0;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.items-editor td {
+  padding: 8px 8px 8px 0;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.items-editor input {
+  padding: 7px 10px;
+}
+
+.items-editor textarea.item-desc {
+  /* single-line look that grows with content (JS autosize) */
+  padding: 7px 10px;
+  min-height: 0;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.45;
+  display: block;
+}
+
+.items-editor .item-qty {
+  max-width: 90px;
+}
+
+.items-editor .item-price {
+  max-width: 130px;
+}
+
+.items-editor .item-amount {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+/* Higher specificity than the .btn-* variants defined below, so the remove
+   action keeps its quiet icon-button look. */
+.items-editor tfoot td {
+  padding-top: 10px;
+  border-bottom: none;
+  font-weight: 600;
+}
+
+.items-editor .subtotal-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.items-editor .item-remove {
+  color: var(--rust);
+  border-color: transparent;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: 6px 11px;
+  border-radius: 999px;
+}
+
+.items-editor .item-remove:hover {
+  background: var(--rust-tint);
+  border-color: var(--rust-tint);
+  color: var(--rust);
+}
+
+/* --------------------------------------------------------------------------
+   Buttons
+   -------------------------------------------------------------------------- */
+
+/* Single-class selector on purpose: variant classes (.btn-primary etc.) share
+   its specificity, so source order decides — button.btn would out-rank them. */
+.btn {
+  display: inline-block;
+  appearance: none;
+  -webkit-appearance: none;
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 9px 18px;
+  line-height: 1.4; /* uniform height: <button> defaults to `normal`, <a> inherits 1.55 */
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease,
+    transform 140ms ease, box-shadow 140ms ease;
+  width: auto;
+}
+
+.btn:hover {
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-primary {
+  background: var(--green);
+  color: #fdfdf9;
+  box-shadow: 0 1px 2px rgba(20, 69, 50, 0.35);
+}
+
+.btn-primary:hover {
+  background: var(--green-deep);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(20, 69, 50, 0.28);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+.btn-secondary:hover {
+  border-color: var(--ink-soft);
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--rust);
+  border-color: #e0bfb4;
+}
+
+.btn-danger:hover {
+  background: var(--rust);
+  border-color: var(--rust);
+  color: #fff;
+}
+
+.btn-sm {
+  font-size: 12.5px;
+  padding: 6px 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Banners
+   -------------------------------------------------------------------------- */
+
+.banner {
+  padding: 13px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  margin-bottom: 22px;
+  font-size: 14px;
+}
+
+.banner-success {
+  background: var(--green-tint);
+  border-color: #cfdfd4;
+  color: var(--green-deep);
+}
+
+.banner-error {
+  background: var(--rust-tint);
+  border-color: #e6c6ba;
+  color: #7c2f1e;
+}
+
+.banner-warning {
+  background: var(--amber-tint);
+  border-color: #e8d9b4;
+  color: var(--amber);
+}
+
+.warning-list {
+  margin: 6px 0 0;
+  padding-left: 20px;
+}
+
+.warning-list li {
+  padding: 1px 0;
+}
+
+/* --------------------------------------------------------------------------
+   Public pay page — the document
+   -------------------------------------------------------------------------- */
+
+.pay-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+  position: relative;
+  z-index: 1;
+}
+
+.pay-card {
+  border-top: 3px solid var(--green);
+  padding: 38px 42px 34px;
+}
+
+.pay-card .page-title {
+  font-size: 26px;
+}
+
+.invoice-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 28px;
+  margin: 22px 0 26px;
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.invoice-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.invoice-meta dt {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0;
+}
+
+.invoice-meta dd {
+  margin: 0;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-card table.table {
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.pay-card table.table th,
+.pay-card table.table td {
+  padding-left: 0;
+}
+
+.totals {
+  margin-left: auto;
+  max-width: 300px;
+  padding-top: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 4px 0;
+  font-size: 14.5px;
+}
+
+.totals .totals-final {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--ink);
+  border-top: 1px solid var(--ink);
+  margin-top: 8px;
+  padding-top: 10px;
+}
+
+.pay-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+.pay-buttons form {
+  width: 100%;
+}
+
+.pay-buttons .btn {
+  width: 100%;
+  text-align: center;
+  padding: 13px 18px;
+  font-size: 15px;
+}
+
+.provider-note {
+  font-size: 12.5px;
+  color: var(--ink-faint);
+  text-align: center;
+  margin: 4px 0 0;
+}
+
+.pay-notes {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.pay-notes-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.pay-notes p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  white-space: pre-line; /* notes are multiline text */
+}
+
+/* --------------------------------------------------------------------------
+   Reports
+   -------------------------------------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 0;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.stat-value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 27px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-alert {
+  color: var(--rust);
+}
+
+.report-total td {
+  font-weight: 700;
+  border-top: 1px solid var(--line-strong);
+  background: #faf8f2;
+}
+
+/* Inline action rows (record payment, sent date, pay link): button sits on
+   the input's baseline instead of stretching to the row height */
+.record-payment .form-row,
+.sent-date-form .form-row,
+.pay-link-row {
+  align-items: flex-end;
+}
+
+.sent-date-form {
+  margin-bottom: 14px;
+}
+
+.record-payment-date {
+  flex: 0 0 170px;
+}
+
+.pay-link-actions {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px; /* align with the input above the form-group margin */
+}
+
+.pay-link-actions .btn {
+  white-space: nowrap;
+}
+
+#pay-link-input {
+  text-overflow: ellipsis;
+}
+
+.record-payment-btn {
+  margin-bottom: 18px; /* match .form-group's bottom margin */
+  white-space: nowrap;
+}
+
+/* Its bottom margin would collapse through the form past the card padding */
+.record-payment p:last-child {
+  margin-bottom: 0;
+}
+
+/* --------------------------------------------------------------------------
+   Timeline
+   -------------------------------------------------------------------------- */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 18px;
+  border-left: 2px solid var(--line-strong);
+}
+
+.timeline-entry {
+  position: relative;
+  padding: 5px 0 5px 8px;
+  font-size: 14px;
+}
+
+/* View entries are noise-prone (own clicks, mail scanners) — quietly removable */
+.timeline-remove {
+  display: inline;
+  margin-left: 4px;
+}
+
+.timeline-remove-btn {
+  background: none;
+  border: none;
+  padding: 0 5px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-faint);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.timeline-remove-btn:hover {
+  color: var(--rust);
+}
+
+.timeline-entry::before {
+  content: '';
+  position: absolute;
+  left: -23px;
+  top: 13px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--stone);
+  border: 2px solid var(--paper);
+}
+
+.timeline-payment::before {
+  background: var(--green);
+}
+
+.timeline-voided::before,
+.timeline-payment_undone::before,
+.timeline-unsent::before {
+  background: var(--rust);
+}
+
+.timeline-sent::before,
+.timeline-emailed::before {
+  background: var(--amber);
+}
+
+/* Views are ambient signal, not actions — hollow dot, quieter text */
+.timeline-viewed::before {
+  background: var(--paper);
+  border-color: var(--stone);
+}
+
+.timeline-viewed .timeline-label {
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.ref {
+  font-size: 13px;
+  color: var(--ink-soft);
+  cursor: default;
+  white-space: nowrap;
+}
+
+a .ref {
+  color: var(--green);
+  cursor: pointer;
+}
+
+.note-edit-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 200px;
+}
+
+.note-edit-form input {
+  padding: 5px 9px;
+  font-size: 13px;
+}
+
+.timeline-when {
+  display: inline-block;
+  min-width: 128px;
+  color: var(--ink-faint);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-label {
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------
+   Utilities
+   -------------------------------------------------------------------------- */
+
+.muted {
+  color: var(--ink-soft);
+}
+
+.mt-1 {
+  margin-top: 8px;
+}
+
+.mt-2 {
+  margin-top: 16px;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--ink-soft);
+  padding: 56px 24px;
+  background: var(--surface);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  margin-bottom: 22px;
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .record-payment .form-row {
+    align-items: stretch;
+  }
+
+  .record-payment-btn {
+    margin-bottom: 0;
+  }
+
+  /* Pay link on mobile: compact URL, equal-width action buttons.
+     In column direction align-items is horizontal — flex-end would shrink
+     children to content width, so stretch instead. */
+  .pay-link-row {
+    align-items: stretch;
+  }
+
+  .pay-link-row .form-group {
+    margin-bottom: 10px;
+  }
+
+  #pay-link-input {
+    font-size: 13px;
+    padding: 8px 10px;
+  }
+
+  .pay-link-actions {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .pay-link-actions .btn {
+    flex: 1;
+    min-width: 0; /* allow equal split despite nowrap content */
+    padding-left: 8px;
+    padding-right: 8px;
+    text-align: center;
+  }
+
+  /* --- Mobile nav: brand + hamburger row, links in a slide-down panel --- */
+  .site-header .container {
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .nav-toggle {
+    display: flex;
+  }
+
+  .site-nav {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    flex-direction: column;
+    gap: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line-strong);
+    box-shadow: 0 12px 24px rgba(29, 26, 21, 0.08);
+  }
+
+  .site-nav.open {
+    display: flex;
+    animation: rise 200ms ease-out both;
+  }
+
+  .site-nav a {
+    padding: 14px 24px;
+    margin-bottom: 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+  }
+
+  .site-nav a.active {
+    color: var(--green);
+    border-bottom-color: var(--line);
+    border-left: 3px solid var(--green);
+    padding-left: 21px;
+  }
+
+  .site-nav a.logout {
+    padding-left: 24px;
+  }
+
+  .site-nav a.logout::before {
+    content: none;
+  }
+
+  .page-title {
+    font-size: 24px;
+  }
+
+  /* --- Stacked tables: rows become labeled cards --- */
+  table.table--stack thead {
+    display: none;
+  }
+
+  table.table--stack tbody tr {
+    display: block;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  table.table--stack tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  table.table--stack td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+    border-bottom: none;
+    text-align: right;
+  }
+
+  table.table--stack td[data-label]::before {
+    content: attr(data-label);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    text-align: left;
+    flex-shrink: 0;
+  }
+
+  table.table--stack td:not([data-label]) {
+    justify-content: flex-end;
+  }
+
+  table.table--stack tr.report-total {
+    background: #faf8f2;
+  }
+
+  /* Note editor takes its own full-width line inside a stacked cell */
+  table.table--stack .note-edit-form {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /* Timeline: timestamp above the label instead of a wrap-forcing column */
+  .timeline-when {
+    display: block;
+    min-width: 0;
+    margin-bottom: 1px;
+  }
+
+  .timeline-entry {
+    padding: 8px 0 8px 8px;
+  }
+
+  .pay-card {
+    padding: 26px 22px;
+  }
+
+  .invoice-meta {
+    grid-template-columns: 1fr;
+  }
+
+  /* Pay page: receipt-style single-line meta rows (label left, value right) */
+  .pay-card .invoice-meta {
+    gap: 8px;
+    padding: 14px 0;
+  }
+
+  .pay-card .invoice-meta > div {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  .items-editor .item-qty {
+    max-width: 64px;
+  }
+
+  .items-editor .item-price {
+    max-width: 96px;
+  }
+}
+
+/* ---------- Invoice subject + multi-line descriptions ---------- */
+
+.preline {
+  white-space: pre-line;
+}
+
+.invoice-subject {
+  margin: -14px 0 18px;
+  font-size: 15px;
+}
+
+.row-subject {
+  display: block;
+  font-size: 12px;
+  margin-top: 1px;
+}
+
+.pay-subject {
+  margin: 2px 0 0;
+  font-size: 14.5px;
+}
+
+/* ---------- Pay page: business identity + trust signals ---------- */
+
+.pay-biz-address {
+  margin: 2px 0 0;
+  font-size: 13px;
+  white-space: pre-line;
+  line-height: 1.45;
+}
+
+/* Subject sits between the meta block and the line items — a "Re:" line */
+.pay-subject {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pay-trust {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+
+.pay-trust-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.pay-trust-line .icon {
+  vertical-align: -2px;
+  margin-right: 6px;
+  color: var(--green);
+}
+
+.pay-trust-detail {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-faint);
+}
+
+.card-chips {
+  margin-left: 8px;
+}
+
+.card-chips span {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-right: 4px;
+}
+
+.card-chips .card-chips-more {
+  border: none;
+  padding-left: 0;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+/* Undone payments on the Payments page: kept for the record, visibly struck */
+.payment-undone td {
+  color: var(--ink-faint);
+}
+
+.payment-undone td[data-label='Amount'] {
+  text-decoration: line-through;
+}
+
+/* ---------- Settings: section nav + provider toggle rows ---------- */
+
+html {
+  scroll-behavior: smooth;
+}
+
+.settings-nav {
+  margin-bottom: 22px;
+}
+
+.card[id] {
+  scroll-margin-top: 24px;
+}
+
+.provider-toggle {
+  margin: 22px 0 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.provider-toggle:first-of-type {
+  margin-top: 4px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.provider-toggle label {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.provider-toggle-name {
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.provider-toggle input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+/* ---------- Button icons ---------- */
+
+.btn .icon {
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.btn-sm .icon {
+  width: 12px;
+  height: 12px;
+  vertical-align: -1.5px;
+  margin-right: 5px;
+}
+
+/* ---------- Error pages (404) ---------- */
+
+/* Center the lone card in the viewport (:has — fine in all evergreen browsers) */
+.pay-wrap:has(.error-card) {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  box-sizing: border-box;
+}
+
+.error-card {
+  text-align: center;
+  padding-top: 46px;
+  padding-bottom: 46px;
+}
+
+.error-code {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 96px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--green);
+  margin: 0 0 6px;
+}
+
+.error-title {
+  font-family: 'Fraunces', Georgia, serif;
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0 0 14px;
+}
+
+.error-note {
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  line-height: 1.6;
+  max-width: 40ch;
+  margin: 0 auto;
+}

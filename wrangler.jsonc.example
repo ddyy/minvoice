@@ -1,0 +1,71 @@
+// Reference config for a FULL production setup: custom domain, Cloudflare
+// Access admin auth, the Cloudflare email binding, and a staging environment.
+// The checked-in wrangler.jsonc is the zero-config starter — graft blocks
+// from here into it as you upgrade. After changes: npx wrangler types
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "minvoice",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  // remote: true proxies local-dev sends to the real service (binary attachments prod-only)
+  "send_email": [{ "name": "EMAIL", "remote": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "minvoice",
+      // npx wrangler d1 create minvoice → paste the id it prints
+      "database_id": "YOUR_D1_DATABASE_ID"
+    }
+  ],
+  "vars": {
+    // Overridden locally via .dev.vars
+    "APP_BASE_URL": "https://invoice.example.com",
+    // Zero Trust team domain + the Access application's AUD tag (see SETUP in README)
+    "ACCESS_TEAM_DOMAIN": "yourteam.cloudflareaccess.com",
+    "ACCESS_AUD": "YOUR_ACCESS_APPLICATION_AUD",
+    "PAYPAL_API_BASE": "https://api-m.paypal.com"
+  },
+  "routes": [{ "pattern": "invoice.example.com", "custom_domain": true }],
+  // Keep the unauthenticated workers.dev hostname off — the custom domain
+  // (covered by Cloudflare Access) should be the only entry point.
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+  // Daily overdue-reminder check (15:00 UTC). Does nothing unless payment
+  // reminders are switched on in Settings → Email.
+  "triggers": { "crons": ["0 15 * * *"] },
+
+  // Staging: sandbox providers, separate D1, own hostname. Deploy with
+  // `npm run deploy:test`. Bindings don't inherit — everything is respecified.
+  // Delete this block if you don't want a staging environment.
+  "env": {
+    "test": {
+      "name": "minvoice-test",
+      "workers_dev": false,
+      "routes": [{ "pattern": "test-invoice.example.com", "custom_domain": true }],
+      "assets": { "directory": "./public", "binding": "ASSETS" },
+      "send_email": [{ "name": "EMAIL" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "minvoice-test",
+          "database_id": "YOUR_STAGING_D1_DATABASE_ID"
+        }
+      ],
+      "vars": {
+        "APP_BASE_URL": "https://test-invoice.example.com",
+        "ACCESS_TEAM_DOMAIN": "yourteam.cloudflareaccess.com",
+        "ACCESS_AUD": "YOUR_ACCESS_APPLICATION_AUD",
+        "PAYPAL_API_BASE": "https://api-m.sandbox.paypal.com"
+      },
+      "observability": { "enabled": true },
+      "triggers": { "crons": ["0 15 * * *"] }
+    }
+  }
+}
