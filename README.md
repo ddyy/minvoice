@@ -50,8 +50,9 @@ Everything beyond the Worker itself is optional:
   (filterable by client), CSV export,
   first-launch setup wizard, configuration warnings for missing secrets
 - **No fees** — fits Cloudflare's free tier (Resend's free tier covers email there), so there's
-  no monthly cost to run, and Minvoice adds no processing fees — you pay only Stripe's or
-  PayPal's own rates, straight to them
+  no monthly cost to run. No subscription and no added payment fees on any plan: you pay only
+  Stripe's or PayPal's own rate (2.9% + 30¢ on card), straight to your own account. Nothing sits
+  in between taking a cut
 - **Your data stays yours** — books live in a D1 database in *your* Cloudflare account; no
   analytics, no tracking, no third-party requests on any page. Payment providers see only the
   charge itself, and clients' invoice pages are unindexed, unguessable URLs
