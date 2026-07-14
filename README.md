@@ -114,7 +114,7 @@ npm run db:migrate:remote         # deploy scripts also run this automatically
 ### 2. Local development
 
 ```sh
-cp .dev.vars.example .dev.vars   # test-mode Stripe key, sandbox PayPal creds; DEV_BYPASS_ACCESS=true
+cp .dev.vars.example .dev.vars   # set ADMIN_PASSWORD (any value locally); test-mode Stripe key, sandbox PayPal creds
 npx wrangler d1 migrations apply minvoice --local
 npm run dev                      # http://localhost:8787 — first visit runs the setup wizard
 ```

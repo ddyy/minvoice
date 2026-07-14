@@ -24,22 +24,11 @@ export function authMode(env: {
 }
 
 /**
- * DEV_BYPASS_ACCESS only counts for local dev — a deployed Worker that
- * somehow has the var set (e.g. secrets copied from .dev.vars.example) must
- * NOT run authless. Two local signals, either suffices:
- * - a localhost hostname, or
- * - no cf-ray header: every request that actually traversed the Cloudflare
- *   edge carries one (wrangler dev emulates the configured route host in
- *   request.url, so hostname alone can't identify local dev).
+ * Local dev request: localhost hostname, or no cf-ray header — every request
+ * that actually traversed the Cloudflare edge carries one (wrangler dev
+ * emulates the configured route host in request.url, so hostname alone can't
+ * identify local dev).
  */
-export function devBypassActive(
-  env: { DEV_BYPASS_ACCESS?: string },
-  req: { url: string; headers: Headers }
-): boolean {
-  return env.DEV_BYPASS_ACCESS === 'true' && isLocalRequest(req);
-}
-
-/** Local dev request: localhost hostname, or no cf-ray (never traversed the edge). */
 export function isLocalRequest(req: { url: string; headers: Headers }): boolean {
   const host = new URL(req.url).hostname;
   if (host === 'localhost' || host === '127.0.0.1' || host === '[::1]') return true;

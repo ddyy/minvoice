@@ -10,10 +10,9 @@ import { getInvoice, getInvoiceItems, getSettings } from './db/queries';
 import { generateInvoicePdf, pdfResponse } from './services/pdf';
 import { sendErrorAlert } from './services/email';
 import { NotFoundPage } from './views/error';
-import { AuthSetupPage, DevBypassPage, LoginPage } from './views/admin/login';
+import { AuthSetupPage, LoginPage } from './views/admin/login';
 import {
   authMode,
-  devBypassActive,
   isLocalRequest,
   SESSION_COOKIE,
   SESSION_TTL_MS,
@@ -43,7 +42,6 @@ app.use('/admin/*', csrfGuard);
 // ---- Login/logout: registered BEFORE the /admin/* auth middleware so they're
 // reachable while signed out. In access mode they defer to Access entirely.
 app.get('/admin/login', (c) => {
-  if (devBypassActive(c.env, c.req.raw)) return c.html(<DevBypassPage />);
   const mode = authMode(c.env);
   if (mode === 'access') return c.redirect('/admin');
   if (mode === 'unconfigured') return c.html(<AuthSetupPage />, 403);

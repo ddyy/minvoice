@@ -1,27 +1,5 @@
 import { Layout } from '../layout';
 
-/** Local dev with DEV_BYPASS_ACCESS: auth is skipped entirely, so explain
- *  why "Log out" has nothing to do instead of silently bouncing to /admin. */
-export function DevBypassPage() {
-  return (
-    <Layout title="Dev bypass" variant="public">
-      <div class="pay-card card login-card">
-        <h1 class="page-title">Local dev bypass is on</h1>
-        <p class="muted mt-1">
-          <code>DEV_BYPASS_ACCESS=true</code> (.dev.vars) auto-authenticates every request, so
-          there's no session to sign in to or out of. Set it to <code>false</code> to exercise the
-          real auth flow locally.
-        </p>
-        <p class="mt-2">
-          <a class="btn btn-primary" href="/admin">
-            Back to admin
-          </a>
-        </p>
-      </div>
-    </Layout>
-  );
-}
-
 /** Password-mode login. Shown only when ADMIN_PASSWORD is set and Access isn't. */
 export function LoginPage({ error, loggedOut }: { error?: boolean; loggedOut?: boolean }) {
   return (

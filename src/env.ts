@@ -15,8 +15,6 @@ export type Bindings = {
   PAYPAL_WEBHOOK_ID?: string;
   RESEND_API_KEY?: string; // only when settings.email_provider = 'resend'
   ADMIN_PASSWORD?: string; // fallback admin login until Cloudflare Access is configured
-  // Local dev only — never set in wrangler.jsonc
-  DEV_BYPASS_ACCESS?: string;
 };
 
 export type AppEnv = { Bindings: Bindings };

@@ -2,7 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { getCookie } from 'hono/cookie';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { AppEnv } from '../env';
-import { authMode, devBypassActive, SESSION_COOKIE, verifySession } from '../lib/admin-auth';
+import { authMode, SESSION_COOKIE, verifySession } from '../lib/admin-auth';
 import { AuthSetupPage } from '../views/admin/login';
 
 // Lazily initialized once per isolate; jose caches the JWKS and refetches on
@@ -18,10 +18,6 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
  * - unconfigured: fail closed with setup instructions.
  */
 export const accessMiddleware = createMiddleware<AppEnv>(async (c, next) => {
-  // Local dev only: .dev.vars sets DEV_BYPASS_ACCESS=true; hostname-gated so
-  // it can never disable auth on a deployed Worker.
-  if (devBypassActive(c.env, c.req.raw)) return next();
-
   const mode = authMode(c.env);
 
   if (mode === 'access') {

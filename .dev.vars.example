@@ -7,7 +7,8 @@
 # Variables in the dashboard). The app hides pay buttons and shows dashboard
 # warnings until they exist.
 
-# Admin login until Cloudflare Access is configured (Access disables it)
+# Admin login until Cloudflare Access is configured (Access disables it).
+# Also used to sign in during local dev (any value works there).
 ADMIN_PASSWORD=
 
 # ---- Payments: add when ready ----
@@ -21,8 +22,5 @@ ADMIN_PASSWORD=
 # RESEND_API_KEY=
 
 # ---- Local development only ----
-# (DEV_BYPASS_ACCESS is hostname-gated to localhost in code — it cannot
-# disable auth on a deployed Worker even if set by mistake)
-# DEV_BYPASS_ACCESS=true
 # APP_BASE_URL=http://localhost:8787
 # PAYPAL_API_BASE=https://api-m.sandbox.paypal.com

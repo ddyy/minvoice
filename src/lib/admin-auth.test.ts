@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authMode, devBypassActive, signSession, timingSafeEqual, verifySession } from './admin-auth';
+import { authMode, isLocalRequest, signSession, timingSafeEqual, verifySession } from './admin-auth';
 
 const REAL_AUD = 'a'.repeat(64);
 
@@ -31,27 +31,20 @@ describe('authMode', () => {
   });
 });
 
-describe('devBypassActive', () => {
+describe('isLocalRequest', () => {
   const req = (url: string, headers: Record<string, string> = {}) => ({ url, headers: new Headers(headers) });
   const edge = { 'cf-ray': '8a1b2c3d4e5f-LAX' };
 
-  it('active on localhost, and on emulated route hosts without cf-ray (wrangler dev)', () => {
-    const env = { DEV_BYPASS_ACCESS: 'true' };
-    expect(devBypassActive(env, req('http://localhost:8787/admin'))).toBe(true);
-    expect(devBypassActive(env, req('http://127.0.0.1:8787/admin'))).toBe(true);
+  it('true on localhost, and on emulated route hosts without cf-ray (wrangler dev)', () => {
+    expect(isLocalRequest(req('http://localhost:8787/admin'))).toBe(true);
+    expect(isLocalRequest(req('http://127.0.0.1:8787/admin'))).toBe(true);
     // wrangler dev emulates the configured route host but adds no cf-ray
-    expect(devBypassActive(env, req('http://invoice.example.com/admin'))).toBe(true);
+    expect(isLocalRequest(req('http://invoice.example.com/admin'))).toBe(true);
   });
 
-  it('never active for requests that traversed the Cloudflare edge', () => {
-    const env = { DEV_BYPASS_ACCESS: 'true' };
-    expect(devBypassActive(env, req('https://minvoice.acme.workers.dev/admin', edge))).toBe(false);
-    expect(devBypassActive(env, req('https://invoice.example.com/admin', edge))).toBe(false);
-  });
-
-  it('inactive without the flag', () => {
-    expect(devBypassActive({}, req('http://localhost:8787/admin'))).toBe(false);
-    expect(devBypassActive({ DEV_BYPASS_ACCESS: 'false' }, req('http://localhost:8787/admin'))).toBe(false);
+  it('false for requests that traversed the Cloudflare edge', () => {
+    expect(isLocalRequest(req('https://minvoice.acme.workers.dev/admin', edge))).toBe(false);
+    expect(isLocalRequest(req('https://invoice.example.com/admin', edge))).toBe(false);
   });
 });
 
