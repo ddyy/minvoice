@@ -1,0 +1,14 @@
+{
+  "name": "minvoice-test",
+  "main": "../src/index.tsx",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "../public", "binding": "ASSETS" },
+  "vars": {
+    "ADMIN_PASSWORD": "integration-test-password",
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+    "APP_BASE_URL": "https://invoice.test"
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "minvoice-test", "database_id": "test" }]
+}
