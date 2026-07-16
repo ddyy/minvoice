@@ -414,30 +414,40 @@ export async function createInvoice(db: D1Database, draft: InvoiceDraft, customN
   const number = customNumber ?? (await claimInvoiceNumber(db));
   const totals = computeTotals(draft.items, settings.tax_rate_bps);
 
-  const res = await db
-    .prepare(
-      `INSERT INTO invoices (number, client_id, currency, issue_date, due_date, subject, notes,
-        tax_rate_bps, subtotal_cents, tax_cents, total_cents, public_token)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      number,
-      draft.client_id,
-      settings.currency,
-      draft.issue_date,
-      draft.due_date,
-      draft.subject,
-      draft.notes,
-      settings.tax_rate_bps,
-      totals.subtotal_cents,
-      totals.tax_cents,
-      totals.total_cents,
-      newPublicToken()
-    )
-    .run();
-  const invoiceId = res.meta.last_row_id;
-  await replaceItems(db, invoiceId, draft.items);
-  return invoiceId;
+  // Header + items in ONE transactional batch so a failure can't strand a
+  // header without its lines. Items reference the header via the UNIQUE
+  // invoice number because last_row_id isn't available mid-batch.
+  const results = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO invoices (number, client_id, currency, issue_date, due_date, subject, notes,
+          tax_rate_bps, subtotal_cents, tax_cents, total_cents, public_token)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        number,
+        draft.client_id,
+        settings.currency,
+        draft.issue_date,
+        draft.due_date,
+        draft.subject,
+        draft.notes,
+        settings.tax_rate_bps,
+        totals.subtotal_cents,
+        totals.tax_cents,
+        totals.total_cents,
+        newPublicToken()
+      ),
+    ...draft.items.map((it, i) =>
+      db
+        .prepare(
+          `INSERT INTO invoice_items (invoice_id, position, description, quantity, unit_price_cents, amount_cents)
+           VALUES ((SELECT id FROM invoices WHERE number = ?), ?, ?, ?, ?, ?)`
+        )
+        .bind(number, i, it.description, it.quantity, it.unit_price_cents, itemAmountCents(it))
+    ),
+  ]);
+  return results[0].meta.last_row_id;
 }
 
 /** Replace all line items and refresh denormalized totals (keeps the invoice's tax snapshot). */
@@ -449,40 +459,36 @@ export async function updateInvoice(
   const inv = await getInvoice(db, invoiceId);
   if (!inv) throw new Error(`invoice ${invoiceId} not found`);
   const totals = computeTotals(draft.items, inv.tax_rate_bps);
-  await db
-    .prepare(
-      `UPDATE invoices SET client_id = ?, issue_date = ?, due_date = ?, subject = ?, notes = ?,
-        subtotal_cents = ?, tax_cents = ?, total_cents = ?, updated_at = datetime('now')
-       WHERE id = ?`
-    )
-    .bind(
-      draft.client_id ?? inv.client_id,
-      draft.issue_date,
-      draft.due_date,
-      draft.subject,
-      draft.notes,
-      totals.subtotal_cents,
-      totals.tax_cents,
-      totals.total_cents,
-      invoiceId
-    )
-    .run();
-  await replaceItems(db, invoiceId, draft.items);
-}
-
-async function replaceItems(db: D1Database, invoiceId: number, items: ItemDraft[]): Promise<void> {
-  const stmts = [db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(invoiceId)];
-  items.forEach((it, i) => {
-    stmts.push(
+  // Header update + item replacement in ONE transactional batch — totals and
+  // lines can never disagree because a partial failure rolls back both.
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE invoices SET client_id = ?, issue_date = ?, due_date = ?, subject = ?, notes = ?,
+          subtotal_cents = ?, tax_cents = ?, total_cents = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      )
+      .bind(
+        draft.client_id ?? inv.client_id,
+        draft.issue_date,
+        draft.due_date,
+        draft.subject,
+        draft.notes,
+        totals.subtotal_cents,
+        totals.tax_cents,
+        totals.total_cents,
+        invoiceId
+      ),
+    db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').bind(invoiceId),
+    ...draft.items.map((it, i) =>
       db
         .prepare(
           `INSERT INTO invoice_items (invoice_id, position, description, quantity, unit_price_cents, amount_cents)
            VALUES (?, ?, ?, ?, ?, ?)`
         )
         .bind(invoiceId, i, it.description, it.quantity, it.unit_price_cents, itemAmountCents(it))
-    );
-  });
-  await db.batch(stmts);
+    ),
+  ]);
 }
 
 /**
@@ -910,48 +916,209 @@ export type WebhookPayment = {
  * Idempotently record a payment webhook and mark the invoice paid.
  *
  * Returns:
- *  - 'paid'      this call performed the unpaid -> paid transition (fire side
- *                effects like receipt emails EXACTLY on this result)
+ *  - 'paid'      this call performed the unpaid -> paid transition (receipt
+ *                and paid-notice emails were enqueued in the same transaction)
  *  - 'recorded'  event was new but the invoice was already paid (e.g. the
  *                webhook arriving after PayPal's capture-on-return)
  *  - 'duplicate' event id already processed
  *
- * Guards: UNIQUE(provider, event_id) on webhook_events (guard #1),
- * UNIQUE(provider, provider_ref) on payments (guard #2), and a status
- * filter on the UPDATE so a paid/void invoice never double-transitions.
+ * Everything — event row, payment, invoice transition, email enqueue — is one
+ * D1 batch, which is transactional and rolls back together. A transient
+ * failure therefore commits nothing, so the provider's retry starts clean;
+ * the event row can never exist without its payment (the bug this replaced).
+ *
+ * Guards: UNIQUE(provider, event_id) on webhook_events (guard #1 — a
+ * duplicate fails the whole batch and is caught below), UNIQUE(provider,
+ * provider_ref) on payments (guard #2, handled inline via ON CONFLICT), and a
+ * status filter on the UPDATE so a paid/void invoice never double-transitions.
+ * The outbox INSERTs run before the UPDATE and share its status filter, so
+ * emails are enqueued exactly when this call performs the transition.
  */
 export async function markInvoicePaidFromWebhook(
   db: D1Database,
   p: WebhookPayment
 ): Promise<'paid' | 'recorded' | 'duplicate'> {
+  const emailPayload = JSON.stringify({
+    invoiceId: p.invoiceId,
+    amountCents: p.amountCents,
+    currency: p.currency,
+    provider: p.provider === 'stripe' ? 'Stripe' : 'PayPal',
+  });
+  const enqueue = (kind: string) =>
+    db
+      .prepare(
+        `INSERT INTO email_outbox (kind, payload)
+         SELECT ?, ? WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ? AND status IN ('draft', 'sent'))`
+      )
+      .bind(kind, emailPayload, p.invoiceId);
+
+  let results: D1Result[];
   try {
-    await db
-      .prepare('INSERT INTO webhook_events (provider, event_id, event_type, payload) VALUES (?, ?, ?, ?)')
-      .bind(p.provider, p.eventId, p.eventType, p.payload)
-      .run();
+    results = await db.batch([
+      db
+        .prepare('INSERT INTO webhook_events (provider, event_id, event_type, payload) VALUES (?, ?, ?, ?)')
+        .bind(p.provider, p.eventId, p.eventType, p.payload),
+      enqueue('payment_receipt'),
+      enqueue('paid_notice'),
+      db
+        .prepare(
+          // If this exact provider payment was undone in-app and the provider
+          // redelivers, resurrect it — the provider is the source of truth.
+          `INSERT INTO payments (invoice_id, provider, provider_ref, amount_cents, currency, recorded_at, stripe_payment_intent)
+           VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
+           ON CONFLICT (provider, provider_ref) DO UPDATE SET
+             undone_at = NULL,
+             stripe_payment_intent = COALESCE(excluded.stripe_payment_intent, stripe_payment_intent)`
+        )
+        .bind(p.invoiceId, p.provider, p.providerRef, p.amountCents, p.currency, p.paymentIntent ?? null),
+      db
+        .prepare(
+          `UPDATE invoices SET status = 'paid', paid_at = datetime('now'), updated_at = datetime('now')
+           WHERE id = ? AND status IN ('draft', 'sent')`
+        )
+        .bind(p.invoiceId),
+    ]);
   } catch (e) {
+    // Only webhook_events can raise UNIQUE here (payments handles its own
+    // conflict inline), so this means: already processed, nothing committed.
     if (String(e).includes('UNIQUE')) return 'duplicate';
     throw e;
   }
-  const results = await db.batch([
-    db
-      .prepare(
-        // If this exact provider payment was undone in-app and the provider
-        // redelivers, resurrect it — the provider is the source of truth.
-        `INSERT INTO payments (invoice_id, provider, provider_ref, amount_cents, currency, recorded_at, stripe_payment_intent)
-         VALUES (?, ?, ?, ?, ?, datetime('now'), ?)
-         ON CONFLICT (provider, provider_ref) DO UPDATE SET
-           undone_at = NULL,
-           stripe_payment_intent = COALESCE(excluded.stripe_payment_intent, stripe_payment_intent)`
-      )
-      .bind(p.invoiceId, p.provider, p.providerRef, p.amountCents, p.currency, p.paymentIntent ?? null),
-    db
-      .prepare(
-        `UPDATE invoices SET status = 'paid', paid_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND status IN ('draft', 'sent')`
-      )
-      .bind(p.invoiceId),
-  ]);
-  const transitioned = (results[1]?.meta?.changes ?? 0) > 0;
+  const transitioned = (results[4]?.meta?.changes ?? 0) > 0;
   return transitioned ? 'paid' : 'recorded';
+}
+
+// ---------- Email outbox (durable side-effect delivery) ----------
+
+export type OutboxKind = 'payment_receipt' | 'paid_notice' | 'reminder';
+export type OutboxRow = { id: number; kind: OutboxKind; payload: string; attempts: number };
+
+/** Pending deliveries that are due now, oldest first. */
+export async function listDueOutbox(db: D1Database, maxAttempts: number, limit = 25): Promise<OutboxRow[]> {
+  return (
+    await db
+      .prepare(
+        `SELECT id, kind, payload, attempts FROM email_outbox
+         WHERE sent_at IS NULL AND attempts < ?
+           AND (next_attempt_at IS NULL OR next_attempt_at <= datetime('now'))
+         ORDER BY id LIMIT ?`
+      )
+      .bind(maxAttempts, limit)
+      .all<OutboxRow>()
+  ).results;
+}
+
+export async function markOutboxSent(db: D1Database, id: number): Promise<void> {
+  // sent_at guard: overlapping drains may both deliver; only one completes.
+  await db.prepare(`UPDATE email_outbox SET sent_at = datetime('now') WHERE id = ? AND sent_at IS NULL`).bind(id).run();
+}
+
+export async function markOutboxFailed(db: D1Database, id: number, error: string, retryInMinutes: number): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE email_outbox SET attempts = attempts + 1, last_error = ?,
+         next_attempt_at = datetime('now', '+' || ? || ' minutes')
+       WHERE id = ?`
+    )
+    .bind(error.slice(0, 500), retryInMinutes, id)
+    .run();
+}
+
+/**
+ * Enqueue an overdue reminder, deduplicated on (invoice, reminderNumber): the
+ * cadence counter derives from DELIVERED reminders (invoice_events rows that
+ * markReminderSent writes), so while reminder N sits undelivered in the
+ * outbox, every later cron run re-derives "reminder N is due" — INSERT OR
+ * IGNORE makes those re-enqueues no-ops instead of a stack of duplicates
+ * that would all fire when an email outage ends.
+ */
+export async function enqueueReminder(
+  db: D1Database,
+  payload: { invoiceId: number; payUrl: string; reminderNumber: number }
+): Promise<void> {
+  await db
+    .prepare(`INSERT OR IGNORE INTO email_outbox (kind, payload, dedup_key) VALUES ('reminder', ?, ?)`)
+    .bind(JSON.stringify(payload), `reminder:${payload.invoiceId}:${payload.reminderNumber}`)
+    .run();
+}
+
+/**
+ * Record a DELIVERED reminder: the history event (which is what the cadence
+ * counter and the invoice timeline read) and the outbox completion commit
+ * together, only after the send succeeded. Both statements are gated on the
+ * outbox row still being unsent, so when overlapping drains both deliver the
+ * same row (at-least-once email), only ONE writes the event — a duplicate
+ * event would advance the cadence counter and skip the next scheduled
+ * reminder.
+ */
+export async function markReminderSent(
+  db: D1Database,
+  outboxId: number,
+  invoiceId: number,
+  detail: string
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO invoice_events (invoice_id, type, detail)
+         SELECT ?, 'reminder', ? WHERE EXISTS (SELECT 1 FROM email_outbox WHERE id = ? AND sent_at IS NULL)`
+      )
+      .bind(invoiceId, detail, outboxId),
+    db.prepare(`UPDATE email_outbox SET sent_at = datetime('now') WHERE id = ? AND sent_at IS NULL`).bind(outboxId),
+  ]);
+}
+
+/**
+ * Cancel a pending outbox row whose delivery would now be wrong (invoice paid
+ * or voided, email turned off). DELETE rather than mark-sent: deletion frees
+ * the dedup_key, so if the situation reverses (payment undone, email back on)
+ * the same reminder number can be enqueued again instead of being blocked
+ * until the 30-day purge. The sent_at guard keeps this a no-op when an
+ * overlapping drain already delivered the row.
+ */
+export async function cancelOutboxRow(db: D1Database, id: number): Promise<void> {
+  await db.prepare(`DELETE FROM email_outbox WHERE id = ? AND sent_at IS NULL`).bind(id).run();
+}
+
+/** Drop delivered rows and exhausted failures once they're a month old. */
+export async function purgeOldOutbox(db: D1Database, maxAttempts: number): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM email_outbox
+       WHERE (sent_at IS NOT NULL OR attempts >= ?) AND created_at < datetime('now', '-30 days')`
+    )
+    .bind(maxAttempts)
+    .run();
+}
+
+// ---------- Login rate limiting (password mode) ----------
+
+/**
+ * Atomically consume one login attempt for this IP and return the count now
+ * used in the current window (a lapsed window restarts at 1). Single
+ * upsert-with-RETURNING so N parallel requests get N distinct counts — the
+ * check-then-increment race this replaced let simultaneous requests all see
+ * a below-limit counter.
+ */
+export async function recordLoginAttempt(db: D1Database, ip: string, windowMinutes: number): Promise<number> {
+  const row = await db
+    .prepare(
+      `INSERT INTO login_attempts (ip, window_start, attempts) VALUES (?, datetime('now'), 1)
+       ON CONFLICT (ip) DO UPDATE SET
+         attempts = CASE WHEN window_start < datetime('now', '-' || ? || ' minutes') THEN 1 ELSE attempts + 1 END,
+         window_start = CASE WHEN window_start < datetime('now', '-' || ? || ' minutes') THEN datetime('now') ELSE window_start END
+       RETURNING attempts`
+    )
+    .bind(ip, windowMinutes, windowMinutes)
+    .first<{ attempts: number }>();
+  return row?.attempts ?? 1;
+}
+
+export async function clearLoginAttempts(db: D1Database, ip: string): Promise<void> {
+  await db.prepare('DELETE FROM login_attempts WHERE ip = ?').bind(ip).run();
+}
+
+/** Housekeeping for the cron: rows whose window lapsed long ago are dead weight. */
+export async function purgeOldLoginAttempts(db: D1Database): Promise<void> {
+  await db.prepare(`DELETE FROM login_attempts WHERE window_start < datetime('now', '-1 day')`).run();
 }

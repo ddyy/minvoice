@@ -6,7 +6,17 @@ import { csrfGuard } from './middleware/csrf';
 import { admin } from './routes/admin';
 import { pay } from './routes/pay';
 import { webhooks } from './routes/webhooks';
-import { getInvoice, getInvoiceItems, getSettings } from './db/queries';
+import {
+  clearLoginAttempts,
+  getInvoice,
+  getInvoiceItems,
+  getSettings,
+  purgeOldLoginAttempts,
+  purgeOldOutbox,
+  recordLoginAttempt,
+} from './db/queries';
+import { processEmailOutbox } from './services/outbox';
+import { LOGIN_MAX_ATTEMPTS, LOGIN_WINDOW_MINUTES, MAX_OUTBOX_ATTEMPTS } from './lib/outbox';
 import { generateInvoicePdf, pdfResponse } from './services/pdf';
 import { sendErrorAlert } from './services/email';
 import { NotFoundPage } from './views/error';
@@ -50,9 +60,20 @@ app.get('/admin/login', (c) => {
 
 app.post('/admin/login', async (c) => {
   if (authMode(c.env) !== 'password') return c.redirect('/admin');
+
+  // Rate limit BEFORE the password check: every POST atomically consumes one
+  // of 10 attempts per IP per 15 minutes (upsert + RETURNING in one D1
+  // statement), so parallel requests each get a distinct count and can't all
+  // observe a below-limit counter. Success clears the row.
+  const ip = c.req.header('cf-connecting-ip') ?? 'local';
+  if ((await recordLoginAttempt(c.env.DB, ip, LOGIN_WINDOW_MINUTES)) > LOGIN_MAX_ATTEMPTS) {
+    return c.html(<LoginPage lockedOut />, 429);
+  }
+
   const body = await c.req.parseBody();
   const password = typeof body.password === 'string' ? body.password : '';
   if (password && (await timingSafeEqual(password, c.env.ADMIN_PASSWORD!))) {
+    c.executionCtx.waitUntil(clearLoginAttempts(c.env.DB, ip));
     const expiresAt = Date.now() + SESSION_TTL_MS;
     setCookie(c, SESSION_COOKIE, await signSession(c.env.ADMIN_PASSWORD!, expiresAt), {
       path: '/',
@@ -65,7 +86,7 @@ app.post('/admin/login', async (c) => {
     });
     return c.redirect('/admin');
   }
-  await new Promise((r) => setTimeout(r, 800)); // brute-force friction
+  await new Promise((r) => setTimeout(r, 800)); // per-request friction on top of the counter
   return c.html(<LoginPage error />, 401);
 });
 
@@ -126,8 +147,17 @@ app.onError((err, c) => {
 
 export default {
   fetch: app.fetch,
-  // Daily reminder cron (wrangler.jsonc triggers). Opt-in via Settings.
+  // Daily cron (wrangler.jsonc triggers): enqueue due reminders (opt-in via
+  // Settings), drain the email outbox (delivers reminders + retries any
+  // payment emails that failed their immediate attempt), then housekeeping.
   scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
-    ctx.waitUntil(sendOverdueReminders(env));
+    ctx.waitUntil(
+      (async () => {
+        await sendOverdueReminders(env);
+        await processEmailOutbox(env);
+        await purgeOldOutbox(env.DB, MAX_OUTBOX_ATTEMPTS);
+        await purgeOldLoginAttempts(env.DB);
+      })()
+    );
   },
 };

@@ -210,12 +210,13 @@ export async function sendReminderEmail(
 export type PaymentEmailInfo = { amountCents: number; currency: string; provider: string };
 
 /**
- * Fire-and-forget side effects when a provider payment lands: receipt to the
- * client, "you got paid" note to the business email, both logged to History.
- * Call ONLY on the 'paid' transition result (exactly-once), inside waitUntil.
- * Failures are logged, never thrown — money is already in the books.
+ * Receipt to the client after a provider payment lands. Delivered through the
+ * email_outbox (enqueued in the same transaction as the paid transition), so
+ * semantics are at-least-once with retries — a failure here THROWS and the
+ * outbox processor records it for a later attempt. No-recipient and
+ * emails-off configurations count as delivered.
  */
-export async function sendPaymentEmails(
+export async function sendPaymentReceipt(
   env: Bindings,
   db: D1Database,
   invoiceId: number,
@@ -228,10 +229,8 @@ export async function sendPaymentEmails(
   const businessName = settings.business_name || 'Minvoice';
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
 
-  // Receipt to the client
   if (invoice.client_email) {
-    try {
-      await deliver(env, settings, {
+    await deliver(env, settings, {
         to: invoice.client_email,
         fromName: businessName,
         ...(settings.business_email ? { replyTo: settings.business_email } : {}),
@@ -257,17 +256,28 @@ export async function sendPaymentEmails(
     </p>
   </div>
 </div>`,
-      });
-      await logInvoiceEvent(db, invoiceId, 'emailed', `Receipt emailed to ${invoice.client_email}`);
-    } catch (e) {
-      console.error('receipt email failed', e);
-    }
+    });
+    await logInvoiceEvent(db, invoiceId, 'emailed', `Receipt emailed to ${invoice.client_email}`);
   }
+}
 
-  // "You got paid" to the business
+/**
+ * "You got paid" note to the business email. Same outbox delivery contract as
+ * sendPaymentReceipt: throws on failure, no-ops count as delivered.
+ */
+export async function sendPaidNotice(
+  env: Bindings,
+  db: D1Database,
+  invoiceId: number,
+  info: PaymentEmailInfo
+): Promise<void> {
+  const [invoice, settings] = await Promise.all([getInvoice(db, invoiceId), getSettings(db)]);
+  if (!invoice) return;
+  if (settings.email_provider === 'none') return;
+  const amount = formatCents(info.amountCents, info.currency);
+
   if (settings.business_email) {
-    try {
-      await deliver(env, settings, {
+    await deliver(env, settings, {
         to: settings.business_email,
         fromName: 'Minvoice',
         subject: `🎉 ${invoice.number} paid — ${amount} from ${invoice.client_name}`,
@@ -282,10 +292,7 @@ export async function sendPaymentEmails(
     <strong>${escapeHtml(invoice.number)}</strong>: <strong>${amount}</strong> via ${escapeHtml(info.provider)}.</p>
   <p><a href="${env.APP_BASE_URL}/admin/invoices/${invoice.id}" style="color: #1e5b43;">Open the invoice</a></p>
 </div>`,
-      });
-    } catch (e) {
-      console.error('paid notification email failed', e);
-    }
+    });
   }
 }
 

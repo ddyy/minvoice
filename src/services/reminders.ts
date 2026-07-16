@@ -1,13 +1,16 @@
 import type { Bindings } from '../env';
-import { getSettings, listOverdueForReminders, logInvoiceEvent } from '../db/queries';
+import { enqueueReminder, getSettings, listOverdueForReminders } from '../db/queries';
 import { todayInTz } from '../lib/dates';
 import { daysBetween, parseSchedule, reminderDue } from '../lib/reminders';
-import { sendReminderEmail } from './email';
 
 /**
  * Daily cron entry point. Opt-in (Settings), no-op when email is off, and
- * idempotent: reminder history lives in invoice_events, so re-running the
- * same day sends nothing new. Per-invoice failures never block the rest.
+ * idempotent: due reminders are enqueued to the email outbox deduplicated on
+ * (invoice, reminderNumber), so re-running while one is pending is a no-op.
+ * The outbox processor (same cron tick) delivers with retries and writes the
+ * reminder history event only on actual delivery — the cadence counter
+ * reflects emails that went out, not emails that were queued. Per-invoice
+ * failures never block the rest.
  */
 export async function sendOverdueReminders(env: Bindings): Promise<void> {
   const settings = await getSettings(env.DB);
@@ -34,16 +37,11 @@ export async function sendOverdueReminders(env: Bindings): Promise<void> {
 
     const n = inv.reminders_sent + 1;
     try {
-      await sendReminderEmail(env, settings, inv, `${base}/pay/${inv.public_token}`, n);
-      // Logged only on success — the cadence counter must reflect reality
-      await logInvoiceEvent(
-        env.DB,
-        inv.id,
-        'reminder',
-        `Reminder ${n} of ${schedule.length} emailed to ${inv.client_email} — ${daysOverdue} days overdue`
-      );
+      // Deduped on (invoice, n): while reminder n is still undelivered in the
+      // outbox, tomorrow's run re-derives "n is due" and this becomes a no-op.
+      await enqueueReminder(env.DB, { invoiceId: inv.id, payUrl: `${base}/pay/${inv.public_token}`, reminderNumber: n });
     } catch (e) {
-      console.error(`reminder failed for invoice ${inv.number}`, e);
+      console.error(`reminder enqueue failed for invoice ${inv.number}`, e);
     }
   }
 }

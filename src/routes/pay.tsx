@@ -14,7 +14,7 @@ import { isLocalRequest } from '../lib/admin-auth';
 import { createCheckoutSession } from '../services/stripe';
 import { captureOrder, createOrder } from '../services/paypal';
 import { generateInvoicePdf, pdfResponse } from '../services/pdf';
-import { sendPaymentEmails } from '../services/email';
+import { processEmailOutbox } from '../services/outbox';
 import { effectiveProviderEnv, providerAvailability } from '../lib/providers';
 import { DraftHold, PublicInvoice } from '../views/pay';
 import { PrintInvoice } from '../views/print';
@@ -173,13 +173,7 @@ pay.get('/:token/paypal/return', async (c) => {
       // 'paid' fires here or on the webhook, never both — the status guard
       // means only one path performs the transition.
       if (result === 'paid') {
-        c.executionCtx.waitUntil(
-          sendPaymentEmails(c.env, c.env.DB, invoice.id, {
-            amountCents: capture.amountCents,
-            currency: capture.currency,
-            provider: 'PayPal',
-          }).catch((e) => console.error('payment emails failed', e))
-        );
+        c.executionCtx.waitUntil(processEmailOutbox(c.env).catch((e) => console.error('outbox drain failed', e)));
       }
       return c.redirect(`${payUrl}?paid=1`, 303);
     }

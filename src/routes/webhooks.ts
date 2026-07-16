@@ -5,7 +5,7 @@ import { getInvoiceByPaypalOrderId, getSettings, markInvoicePaidFromWebhook } fr
 import { effectiveProviderEnv } from '../lib/providers';
 import { verifyStripeEvent } from '../services/stripe';
 import { verifyWebhook as verifyPaypalWebhook } from '../services/paypal';
-import { sendPaymentEmails } from '../services/email';
+import { processEmailOutbox } from '../services/outbox';
 
 export const webhooks = new Hono<AppEnv>();
 
@@ -47,14 +47,10 @@ webhooks.post('/stripe', async (c) => {
       paymentIntent: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id,
     });
     if (result === 'paid') {
-      // After the 200 — Stripe shouldn't wait on our emails
-      c.executionCtx.waitUntil(
-        sendPaymentEmails(c.env, c.env.DB, invoiceId, {
-          amountCents: session.amount_total ?? 0,
-          currency: (session.currency ?? 'USD').toUpperCase(),
-          provider: 'Stripe',
-        }).catch((e) => console.error('payment emails failed', e))
-      );
+      // Receipt + paid-notice were enqueued atomically with the transition;
+      // attempt delivery now, after the 200 — Stripe shouldn't wait on it.
+      // Failures stay in the outbox for the cron to retry.
+      c.executionCtx.waitUntil(processEmailOutbox(c.env).catch((e) => console.error('outbox drain failed', e)));
     }
   }
   return c.text('ok', 200);
@@ -108,11 +104,7 @@ webhooks.post('/paypal', async (c) => {
       currency,
     });
     if (result === 'paid') {
-      c.executionCtx.waitUntil(
-        sendPaymentEmails(c.env, c.env.DB, invoiceId, { amountCents, currency, provider: 'PayPal' }).catch((e) =>
-          console.error('payment emails failed', e)
-        )
-      );
+      c.executionCtx.waitUntil(processEmailOutbox(c.env).catch((e) => console.error('outbox drain failed', e)));
     }
   }
   return c.text('ok', 200);

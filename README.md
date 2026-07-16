@@ -36,16 +36,18 @@ Everything beyond the Worker itself is optional:
   default rates, custom or auto numbering (including dated prefixes like `{YYYY}{MM}{DD}` with a
   per-day counter), duplicate-invoice, and full-status delete with guardrails
 - **Get paid** — unguessable pay links (20-char, 100-bit tokens) with hosted Stripe Checkout and
-  PayPal buttons; webhooks are the source of truth and are fully idempotent; receipts and
-  "you got paid" notifications send exactly once
+  PayPal buttons; webhooks are the source of truth, fully idempotent, and record each payment
+  atomically (event, payment, and status change commit or roll back together); receipts and
+  "you got paid" notifications are enqueued in that same transaction and delivered with retries
+  (at-least-once — a rare duplicate beats a silent never)
 - **Documents** — a print-optimized invoice view (one-click print, `PAID`/`VOID` stamps) and a
   generated PDF (pdf-lib) attached to invoice emails
 - **History** — every invoice keeps an activity timeline: edits, sends, payments (with undo),
   and pay-link views with city-level geolocation (bot- and scanner-filtered, admin views excluded)
 - **Email** — Cloudflare Email Sending or Resend, selectable in Settings
 - **Payment reminders** — opt-in daily cron emails overdue clients on an editable schedule
-  (default 1, 7, and 14 days past due, up to 10 reminders, burst-protected); every send is
-  logged to the invoice history
+  (default 1, 7, and 14 days past due, up to 10 reminders, burst-protected); every reminder is
+  logged to the invoice history and delivered through a durable outbox that retries failures
 - **Admin** — dashboard with status tabs and client filter, payments list, monthly reports
   (filterable by client), CSV export,
   first-launch setup wizard, configuration warnings for missing secrets
