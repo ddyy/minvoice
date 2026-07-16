@@ -20,4 +20,3 @@ describe('backoffMinutes', () => {
     expect(backoffMinutes(-1)).toBe(5);
   });
 });
-
