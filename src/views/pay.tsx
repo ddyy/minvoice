@@ -1,6 +1,7 @@
 import { Layout } from './layout';
 import type { InvoiceItem, InvoiceWithClient, Settings } from '../db/queries';
-import { formatCents, formatTaxRate } from '../lib/money';
+import { formatTaxRate } from '../lib/money';
+import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
 import { Icon } from './icons';
 
 type Props = {
@@ -20,14 +21,13 @@ type Props = {
  * the admin's preview buttons work on drafts.)
  */
 export function DraftHold({ invoice, settings }: { invoice: InvoiceWithClient; settings: Settings }) {
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
   return (
-    <Layout title={`Invoice ${invoice.number} — ${settings.business_name}`} variant="public">
+    <Layout title={`${t.invoice} ${invoice.number} — ${settings.business_name}`} variant="public" lang={tag}>
       <div class="pay-card card error-card">
-        <h1 class="error-title">This invoice isn't ready yet</h1>
-        <p class="error-note">
-          {settings.business_name} is still preparing invoice {invoice.number}. This link will show
-          the invoice as soon as it's finalized — check back shortly.
-        </p>
+        <h1 class="error-title">{t.draftHoldTitle}</h1>
+        <p class="error-note">{t.draftHoldBody(settings.business_name, invoice.number)}</p>
       </div>
     </Layout>
   );
@@ -35,31 +35,36 @@ export function DraftHold({ invoice, settings }: { invoice: InvoiceWithClient; s
 
 export function PublicInvoice({ invoice, items, settings, justPaid, providers }: Props) {
   const cur = invoice.currency;
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const money = (cents: number) => formatCentsTag(cents, cur, tag);
   // Drafts are not payable — amounts may still change before the invoice is sent.
   const payable = invoice.status === 'sent';
   return (
-    <Layout title={`Invoice ${invoice.number} — ${settings.business_name}`} variant="public">
+    <Layout title={`${t.invoice} ${invoice.number} — ${settings.business_name}`} variant="public" lang={tag}>
       {justPaid && invoice.status !== 'paid' ? (
         <div class="banner banner-success">
-          Thank you! Your payment is being confirmed — this page will show it shortly.
+          {t.paymentConfirming}
         </div>
       ) : null}
       {invoice.status === 'paid' ? (
-        <div class="banner banner-success">This invoice has been paid{justPaid ? ' — thank you!' : '.'}</div>
+        <div class="banner banner-success">{justPaid ? t.invoicePaidThanks : t.invoicePaid}</div>
       ) : null}
-      {invoice.status === 'void' ? <div class="banner banner-error">This invoice has been voided.</div> : null}
+      {invoice.status === 'void' ? <div class="banner banner-error">{t.invoiceVoided}</div> : null}
 
       <div class="pay-card card">
         <div class="page-head">
           <div>
-            <h1 class="page-title">{settings.business_name || 'Invoice'}</h1>
+            <h1 class="page-title">{settings.business_name || t.invoice}</h1>
             {settings.business_address ? <p class="pay-biz-address muted">{settings.business_address}</p> : null}
             {settings.business_email ? <p class="pay-biz-address muted">{settings.business_email}</p> : null}
           </div>
           <div class="actions">
             {/* Internal statuses (draft/sent) mean nothing to the client — only show settled states. */}
             {invoice.status === 'paid' || invoice.status === 'void' ? (
-              <span class={`badge badge-${invoice.status}`}>{invoice.status}</span>
+              <span class={`badge badge-${invoice.status}`}>
+                {invoice.status === 'paid' ? t.paid : t.statusVoid.toLocaleLowerCase(tag)}
+              </span>
             ) : null}
             <a
               href={`/pay/${invoice.public_token}/print?auto=1`}
@@ -68,32 +73,32 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
               rel="noopener"
             >
               <Icon name="printer" />
-              Print
+              {t.print}
             </a>
             <a href={`/pay/${invoice.public_token}/pdf`} class="btn btn-secondary btn-sm">
               <Icon name="download" />
-              Download PDF
+              {t.downloadPdf}
             </a>
           </div>
         </div>
 
         <dl class="invoice-meta">
           <div>
-            <dt class="muted">Invoice</dt>
+            <dt class="muted">{t.invoice}</dt>
             <dd>{invoice.number}</dd>
           </div>
           <div>
-            <dt class="muted">Billed to</dt>
+            <dt class="muted">{t.billedTo}</dt>
             <dd>{invoice.client_name}</dd>
           </div>
           <div>
-            <dt class="muted">Issued</dt>
-            <dd>{invoice.issue_date}</dd>
+            <dt class="muted">{t.issued}</dt>
+            <dd>{formatDateTag(invoice.issue_date, tag)}</dd>
           </div>
           {invoice.due_date ? (
             <div>
-              <dt class="muted">Due</dt>
-              <dd>{invoice.due_date}</dd>
+              <dt class="muted">{t.due}</dt>
+              <dd>{formatDateTag(invoice.due_date, tag)}</dd>
             </div>
           ) : null}
         </dl>
@@ -103,10 +108,10 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
         <table class="table">
           <thead>
             <tr>
-              <th>Description</th>
-              <th class="text-right">Qty</th>
-              <th class="text-right">Unit</th>
-              <th class="text-right">Amount</th>
+              <th>{t.description}</th>
+              <th class="text-right">{t.qty}</th>
+              <th class="text-right">{t.unitPrice}</th>
+              <th class="text-right">{t.amount}</th>
             </tr>
           </thead>
           <tbody>
@@ -114,8 +119,8 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
               <tr>
                 <td class="preline">{it.description}</td>
                 <td class="text-right item-dim">{it.quantity}</td>
-                <td class="text-right item-dim">{formatCents(it.unit_price_cents, cur)}</td>
-                <td class="text-right">{formatCents(it.amount_cents, cur)}</td>
+                <td class="text-right item-dim">{money(it.unit_price_cents)}</td>
+                <td class="text-right">{money(it.amount_cents)}</td>
               </tr>
             ))}
           </tbody>
@@ -123,22 +128,22 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
 
         <div class="totals">
           <div>
-            <span class="muted">Subtotal</span> <span>{formatCents(invoice.subtotal_cents, cur)}</span>
+            <span class="muted">{t.subtotal}</span> <span>{money(invoice.subtotal_cents)}</span>
           </div>
           {invoice.tax_cents > 0 ? (
             <div>
-              <span class="muted">Tax ({formatTaxRate(invoice.tax_rate_bps)})</span>{' '}
-              <span>{formatCents(invoice.tax_cents, cur)}</span>
+              <span class="muted">{t.tax} ({formatTaxRate(invoice.tax_rate_bps)})</span>{' '}
+              <span>{money(invoice.tax_cents)}</span>
             </div>
           ) : null}
           <div class="totals-final">
-            <span>Total</span> <span>{formatCents(invoice.total_cents, cur)}</span>
+            <span>{t.total}</span> <span>{money(invoice.total_cents)}</span>
           </div>
         </div>
 
         {invoice.notes ? (
           <div class="pay-notes mt-2">
-            <span class="pay-notes-label">Notes</span>
+            <span class="pay-notes-label">{t.notes}</span>
             <p>{invoice.notes}</p>
           </div>
         ) : null}
@@ -149,25 +154,25 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
               <form method="post" action={`/pay/${invoice.public_token}/stripe`}>
                 <button class="btn btn-primary" type="submit">
                   <Icon name="card" />
-                  Pay with card
+                  {t.payWithCard}
                 </button>
               </form>
             ) : null}
             {providers.paypal ? (
               <form method="post" action={`/pay/${invoice.public_token}/paypal`}>
                 <button class={providers.stripe ? 'btn btn-secondary' : 'btn btn-primary'} type="submit">
-                  Pay with PayPal
+                  {t.payWithPaypal}
                 </button>
               </form>
             ) : null}
             <div class="pay-trust">
               <p class="pay-trust-line">
                 <Icon name="lock" />
-                Payments are secure and encrypted — card details never touch this site.
+                {t.trustLine}
               </p>
               {providers.stripe ? (
                 <p class="pay-trust-detail">
-                  Cards are processed by <strong>Stripe</strong>
+                  {t.trustCardsPrefix} <strong>Stripe</strong>
                   <span class="card-chips" aria-hidden="true">
                     <span>Visa</span>
                     <span>Mastercard</span>
@@ -179,17 +184,14 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
               ) : null}
               {providers.paypal ? (
                 <p class="pay-trust-detail">
-                  PayPal payments redirect to <strong>paypal.com</strong> to complete.
+                  {t.trustPaypal}
                 </p>
               ) : null}
             </div>
           </div>
         ) : null}
         {payable && !providers.stripe && !providers.paypal ? (
-          <p class="muted mt-2">
-            Online payment isn't available for this invoice
-            {settings.business_email ? ` — please contact ${settings.business_email}` : ''}.
-          </p>
+          <p class="muted mt-2">{t.noOnlinePayment(settings.business_email)}</p>
         ) : null}
 
       </div>

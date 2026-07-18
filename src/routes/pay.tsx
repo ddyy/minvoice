@@ -109,7 +109,7 @@ pay.get('/:token/pdf', async (c) => {
     getSettings(c.env.DB),
   ]);
   return pdfResponse(
-    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`),
+    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`, c.env.ASSETS),
     `${invoice.number}.pdf`
   );
 });

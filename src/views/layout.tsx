@@ -3,6 +3,8 @@ import type { Child } from 'hono/jsx';
 
 type LayoutProps = {
   title: string;
+  /** BCP-47 tag for the html lang attribute — public pages pass the customer locale */
+  lang?: string;
   children: Child;
   /** 'admin' shows the nav bar; 'public' is the bare pay-page shell */
   variant?: 'admin' | 'public';
@@ -17,11 +19,11 @@ const NAV_LINKS = [
   { href: '/admin/settings', label: 'Settings' },
 ];
 
-export function Layout({ title, children, variant = 'admin', currentPath = '' }: LayoutProps) {
+export function Layout({ title, children, variant = 'admin', currentPath = '', lang = 'en' }: LayoutProps) {
   return (
     <>
       {raw('<!DOCTYPE html>')}
-      <html lang="en">
+      <html lang={lang}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

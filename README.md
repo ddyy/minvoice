@@ -45,6 +45,9 @@ Everything beyond the Worker itself is optional:
 - **History** — every invoice keeps an activity timeline: edits, sends, payments (with undo),
   and pay-link views with city-level geolocation (bot- and scanner-filtered, admin views excluded)
 - **Email** — Cloudflare Email Sending or Resend, selectable in Settings
+- **Languages** — everything clients see (emails, pay page, PDF) in English, Spanish, German, or
+  French, with per-client overrides and regional date/number formatting (e.g. `de-AT`); the admin
+  stays English
 - **Payment reminders** — opt-in daily cron emails overdue clients on an editable schedule
   (default 1, 7, and 14 days past due, up to 10 reminders, burst-protected); every reminder is
   logged to the invoice history and delivered through a durable outbox that retries failures
@@ -224,6 +227,28 @@ hostname, and sandbox provider credentials — so fake money can never reach you
 
 `GET /health` returns 200 only when the Worker and D1 both answer — point any external monitor
 at it. If you firewall datacenter ASNs, exempt this path.
+
+## Languages
+
+Set "Customer language & region" in Settings (built-in: `en`, `es`, `de`, `fr`), or override it
+per client for businesses invoicing across languages. The value is a BCP-47 tag: the language
+picks the wording, the full tag drives date and currency formatting — so `de-AT` gets German
+text with Austrian formatting (`18.07.2026`, `1.234,56 €`). Everything the CLIENT sees is
+localized: invoice/reminder/receipt emails, the public pay page, the print view, and the PDF.
+The admin UI stays English.
+
+Adding a language is one file: copy `src/lib/strings/en.ts`, translate the values, and register
+it in `src/lib/strings/index.ts` — the compiler enforces completeness. The same file is the
+supported way to adjust wording you disagree with (say, `MwSt.` instead of `USt.`).
+
+PDFs embed Noto Sans/Serif (SIL OFL, see `public/fonts/pdf/OFL.txt`), which covers Latin —
+including Polish, Czech, Turkish, Vietnamese — plus Greek and Cyrillic, with per-document glyph
+subsetting so files stay small. Right-to-left scripts (Arabic, Hebrew) and Indic scripts are out
+of scope: correct rendering needs a text-shaping engine the PDF layer doesn't have. CJK would
+need you to ship your own font files in a fork.
+
+Spanish and French strings were drafted by the maintainers — native-speaker review PRs are
+welcome and are deliberately easy first contributions.
 
 ## Operations
 

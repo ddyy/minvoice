@@ -1,4 +1,5 @@
 import { Layout } from '../layout';
+import { SUPPORTED_LOCALES } from '../../lib/strings';
 import { Icon } from '../icons';
 import type { Client } from '../../db/queries';
 
@@ -103,6 +104,16 @@ export function ClientNewPage({ currentPath }: { currentPath: string }) {
             <input type="number" id="payment_terms_days" name="payment_terms_days" min="0" placeholder="Inherit from settings" />
             <span class="muted">Overrides the settings payment terms for this client's invoices.</span>
           </div>
+          <div class="form-group">
+            <label for="locale">Language &amp; region</label>
+            <input type="text" id="locale" name="locale" list="locale-list" autocomplete="off" placeholder="Inherit from settings" />
+            <datalist id="locale-list">
+              {SUPPORTED_LOCALES.map((l) => (
+                <option value={l.tag}>{l.label}</option>
+              ))}
+            </datalist>
+            <span class="muted">Language for this client's emails, pay page, and PDF (e.g. de, es-MX).</span>
+          </div>
           <div class="actions">
             <button type="submit" class="btn btn-primary">
               Add client
@@ -162,6 +173,24 @@ export function ClientEditPage({ currentPath, client }: { currentPath: string; c
               placeholder="Inherit from settings"
             />
             <span class="muted">Overrides the settings payment terms for this client's invoices.</span>
+          </div>
+          <div class="form-group">
+            <label for="locale">Language &amp; region</label>
+            <input
+              type="text"
+              id="locale"
+              name="locale"
+              value={client.locale ?? ''}
+              list="locale-list-edit"
+              autocomplete="off"
+              placeholder="Inherit from settings"
+            />
+            <datalist id="locale-list-edit">
+              {SUPPORTED_LOCALES.map((l) => (
+                <option value={l.tag}>{l.label}</option>
+              ))}
+            </datalist>
+            <span class="muted">Language for this client's emails, pay page, and PDF (e.g. de, es-MX).</span>
           </div>
           <div class="form-group">
             <label>

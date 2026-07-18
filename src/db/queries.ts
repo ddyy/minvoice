@@ -16,6 +16,7 @@ export type Settings = {
   next_invoice_number: number;
   default_rate_cents: number; // 0 = no default
   timezone: string; // IANA name; storage stays UTC
+  locale: string; // BCP-47 tag for customer-facing language + formatting
   email_provider: 'cloudflare' | 'resend' | 'none';
   email_from: string;
   reminders_enabled: number;
@@ -45,6 +46,7 @@ export type Client = {
   archived: number;
   default_rate_cents: number | null; // NULL = inherit settings default
   payment_terms_days: number | null; // NULL = inherit settings terms
+  locale: string | null; // NULL = inherit settings locale (customer-facing language)
   created_at: string;
 };
 
@@ -96,7 +98,7 @@ export type Payment = {
   stripe_payment_intent: string | null; // pi_... for dashboard deep links
 };
 
-export type InvoiceWithClient = Invoice & { client_name: string; client_email: string | null };
+export type InvoiceWithClient = Invoice & { client_name: string; client_email: string | null; client_locale: string | null };
 
 export function isOverdue(
   inv: Pick<Invoice, 'status' | 'due_date'>,
@@ -138,7 +140,7 @@ export async function updateSettings(
     .prepare(
       `UPDATE settings SET business_name = ?, business_address = ?, business_email = ?,
        logo_url = ?, currency = ?, tax_rate_bps = ?, invoice_prefix = ?, default_rate_cents = ?, timezone = ?,
-       email_provider = ?, email_from = ?, payment_terms_days = ?
+       locale = ?, email_provider = ?, email_from = ?, payment_terms_days = ?
        WHERE id = 1`
     )
     .bind(
@@ -151,6 +153,7 @@ export async function updateSettings(
       s.invoice_prefix,
       s.default_rate_cents,
       s.timezone,
+      s.locale,
       s.email_provider,
       s.email_from,
       s.payment_terms_days
@@ -218,7 +221,7 @@ export async function listOverdueForReminders(db: D1Database, today: string): Pr
   return (
     await db
       .prepare(
-        `SELECT i.*, c.name AS client_name, c.email AS client_email,
+        `SELECT i.*, c.name AS client_name, c.email AS client_email, c.locale AS client_locale,
            (SELECT COUNT(*) FROM invoice_events e WHERE e.invoice_id = i.id AND e.type = 'reminder') AS reminders_sent,
            (SELECT MAX(created_at) FROM invoice_events e WHERE e.invoice_id = i.id AND e.type = 'reminder') AS last_reminder_at
          FROM invoices i JOIN clients c ON c.id = i.client_id
@@ -325,11 +328,12 @@ export async function getClient(db: D1Database, id: number): Promise<Client | nu
 
 export async function createClient(
   db: D1Database,
-  c: Pick<Client, 'name' | 'email' | 'address' | 'default_rate_cents' | 'payment_terms_days'>
+  c: Pick<Client, 'name' | 'email' | 'address' | 'default_rate_cents' | 'payment_terms_days'> &
+    Partial<Pick<Client, 'locale'>>
 ): Promise<number> {
   const res = await db
-    .prepare('INSERT INTO clients (name, email, address, default_rate_cents, payment_terms_days) VALUES (?, ?, ?, ?, ?)')
-    .bind(c.name, c.email, c.address, c.default_rate_cents, c.payment_terms_days)
+    .prepare('INSERT INTO clients (name, email, address, default_rate_cents, payment_terms_days, locale) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(c.name, c.email, c.address, c.default_rate_cents, c.payment_terms_days, c.locale ?? null)
     .run();
   return res.meta.last_row_id;
 }
@@ -337,11 +341,11 @@ export async function createClient(
 export async function updateClient(
   db: D1Database,
   id: number,
-  c: Pick<Client, 'name' | 'email' | 'address' | 'archived' | 'default_rate_cents' | 'payment_terms_days'>
+  c: Pick<Client, 'name' | 'email' | 'address' | 'archived' | 'default_rate_cents' | 'payment_terms_days' | 'locale'>
 ): Promise<void> {
   await db
-    .prepare('UPDATE clients SET name = ?, email = ?, address = ?, archived = ?, default_rate_cents = ?, payment_terms_days = ? WHERE id = ?')
-    .bind(c.name, c.email, c.address, c.archived, c.default_rate_cents, c.payment_terms_days, id)
+    .prepare('UPDATE clients SET name = ?, email = ?, address = ?, archived = ?, default_rate_cents = ?, payment_terms_days = ?, locale = ? WHERE id = ?')
+    .bind(c.name, c.email, c.address, c.archived, c.default_rate_cents, c.payment_terms_days, c.locale, id)
     .run();
 }
 
@@ -351,7 +355,7 @@ export async function listInvoices(db: D1Database): Promise<InvoiceWithClient[]>
   return (
     await db
       .prepare(
-        `SELECT i.*, c.name AS client_name, c.email AS client_email
+        `SELECT i.*, c.name AS client_name, c.email AS client_email, c.locale AS client_locale
          FROM invoices i JOIN clients c ON c.id = i.client_id
          ORDER BY i.id DESC`
       )
@@ -362,7 +366,7 @@ export async function listInvoices(db: D1Database): Promise<InvoiceWithClient[]>
 export async function getInvoice(db: D1Database, id: number): Promise<InvoiceWithClient | null> {
   return db
     .prepare(
-      `SELECT i.*, c.name AS client_name, c.email AS client_email
+      `SELECT i.*, c.name AS client_name, c.email AS client_email, c.locale AS client_locale
        FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.id = ?`
     )
     .bind(id)
@@ -372,7 +376,7 @@ export async function getInvoice(db: D1Database, id: number): Promise<InvoiceWit
 export async function getInvoiceByToken(db: D1Database, token: string): Promise<InvoiceWithClient | null> {
   return db
     .prepare(
-      `SELECT i.*, c.name AS client_name, c.email AS client_email
+      `SELECT i.*, c.name AS client_name, c.email AS client_email, c.locale AS client_locale
        FROM invoices i JOIN clients c ON c.id = i.client_id WHERE i.public_token = ?`
     )
     .bind(token)

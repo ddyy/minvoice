@@ -109,6 +109,7 @@ admin.post('/setup', async (c) => {
     invoice_prefix: values.invoice_prefix,
     default_rate_cents: (values.default_rate && parseAmountToCents(values.default_rate)) || 0,
     timezone: values.timezone,
+    locale: 'en',
     // No send_email binding (zero-config deploys) -> Resend is the workable provider
     email_provider: c.env.EMAIL ? 'cloudflare' : 'resend',
     email_from: '',
@@ -117,6 +118,11 @@ admin.post('/setup', async (c) => {
   await completeSetup(c.env.DB);
   return c.redirect('/admin');
 });
+
+/** A plausible BCP-47 tag like 'en', 'de-AT', 'fr-CA' (strings fall back to English for unknown languages). */
+function validLocaleTag(v: string | undefined): v is string {
+  return !!v && /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/.test(v.trim());
+}
 
 /** Normalize a parseBody({ all: true }) field into a string[]. */
 function arr(v: string | string[] | undefined): string[] {
@@ -440,7 +446,7 @@ admin.post('/invoices/:id/status', async (c) => {
           }
           try {
             const [items, settings] = await Promise.all([getInvoiceItems(c.env.DB, id), getSettings(c.env.DB)]);
-            const pdf = await generateInvoicePdf(invoice, items, settings);
+            const pdf = await generateInvoicePdf(invoice, items, settings, undefined, c.env.ASSETS);
             await sendInvoiceEmail(c.env, invoice, settings, pdf);
           } catch (e) {
             console.error('invoice email failed', e);
@@ -575,6 +581,7 @@ admin.post('/clients', async (c) => {
     address: body.address || null,
     default_rate_cents: body.default_rate ? parseAmountToCents(body.default_rate) : null,
     payment_terms_days: body.payment_terms_days?.trim() ? Math.max(0, parseInt(body.payment_terms_days, 10) || 0) : null,
+    locale: validLocaleTag(body.locale) ? body.locale.trim() : null,
   });
   return c.redirect('/admin/clients');
 });
@@ -607,6 +614,7 @@ admin.post('/clients/:id', async (c) => {
     archived: body.archived ? 1 : 0,
     default_rate_cents: body.default_rate ? parseAmountToCents(body.default_rate) : null,
     payment_terms_days: body.payment_terms_days?.trim() ? Math.max(0, parseInt(body.payment_terms_days, 10) || 0) : null,
+    locale: validLocaleTag(body.locale) ? body.locale.trim() : null,
   });
 
   return c.redirect('/admin/clients');
@@ -796,6 +804,7 @@ admin.post('/settings', async (c) => {
     invoice_prefix: body.invoice_prefix,
     default_rate_cents: (body.default_rate && parseAmountToCents(body.default_rate)) || 0,
     timezone: tzValid ? body.timezone : current.timezone,
+    locale: validLocaleTag(body.locale) ? body.locale.trim() : current.locale,
     // Email settings live in their own card/form — preserve as-is here
     email_provider: current.email_provider,
     email_from: current.email_from,

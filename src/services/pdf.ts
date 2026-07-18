@@ -1,6 +1,8 @@
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import type { InvoiceItem, InvoiceWithClient, Settings } from '../db/queries';
-import { formatCents, formatTaxRate } from '../lib/money';
+import { formatTaxRate } from '../lib/money';
+import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
 
 // US Letter, "Ledger" palette — mirrors public/styles.css
 const PAGE = { width: 612, height: 792 };
@@ -25,23 +27,82 @@ type Ctx = {
   y: number;
 };
 
+/**
+ * Noto Sans/Serif (Latin + Greek + Cyrillic) served from the static assets
+ * binding — assets don't count toward Worker script size, and `subset: true`
+ * embeds only used glyphs per document. Font BYTES are cached per isolate;
+ * each PDFDocument still embeds its own copy (pdf-lib requirement).
+ * Any failure here falls back to the WinAnsi standard fonts, which keeps
+ * PDFs rendering (Latin-1 only) even if a fork drops the font files.
+ */
+const FONT_PATHS = {
+  regular: '/fonts/pdf/NotoSans-Regular.ttf',
+  bold: '/fonts/pdf/NotoSans-Bold.ttf',
+  serif: '/fonts/pdf/NotoSerif-Regular.ttf',
+  serifBold: '/fonts/pdf/NotoSerif-Bold.ttf',
+} as const;
+let fontBytesPromise: Promise<Record<keyof typeof FONT_PATHS, ArrayBuffer> | null> | null = null;
+
+function loadFontBytes(assets: Fetcher | undefined) {
+  if (!assets) return Promise.resolve(null);
+  fontBytesPromise ??= (async () => {
+    try {
+      const entries = await Promise.all(
+        (Object.keys(FONT_PATHS) as (keyof typeof FONT_PATHS)[]).map(async (k) => {
+          const res = await assets.fetch(`https://assets.local${FONT_PATHS[k]}`);
+          if (!res.ok) throw new Error(`font ${FONT_PATHS[k]}: ${res.status}`);
+          return [k, await res.arrayBuffer()] as const;
+        })
+      );
+      return Object.fromEntries(entries) as Record<keyof typeof FONT_PATHS, ArrayBuffer>;
+    } catch (e) {
+      console.error('PDF fonts unavailable, falling back to standard fonts', e);
+      return null;
+    }
+  })();
+  return fontBytesPromise;
+}
+
+async function embedFonts(doc: PDFDocument, assets: Fetcher | undefined) {
+  const bytes = await loadFontBytes(assets);
+  if (!bytes) {
+    return {
+      regular: await doc.embedFont(StandardFonts.Helvetica),
+      bold: await doc.embedFont(StandardFonts.HelveticaBold),
+      serif: await doc.embedFont(StandardFonts.TimesRoman),
+      serifBold: await doc.embedFont(StandardFonts.TimesRomanBold),
+    };
+  }
+  doc.registerFontkit(fontkit);
+  return {
+    regular: await doc.embedFont(bytes.regular, { subset: true }),
+    bold: await doc.embedFont(bytes.bold, { subset: true }),
+    serif: await doc.embedFont(bytes.serif, { subset: true }),
+    serifBold: await doc.embedFont(bytes.serifBold, { subset: true }),
+  };
+}
+
 export async function generateInvoicePdf(
   invoice: InvoiceWithClient,
   items: InvoiceItem[],
   settings: Settings,
-  payUrl?: string
+  payUrl?: string,
+  assets?: Fetcher
 ): Promise<Uint8Array> {
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const money = (cents: number) => formatCentsTag(cents, invoice.currency, tag);
+  const date = (iso: string) => formatDateTag(iso, tag);
+
   const doc = await PDFDocument.create();
+  const fonts = await embedFonts(doc, assets);
   const ctx: Ctx = {
     doc,
     page: doc.addPage([PAGE.width, PAGE.height]),
-    regular: await doc.embedFont(StandardFonts.Helvetica),
-    bold: await doc.embedFont(StandardFonts.HelveticaBold),
-    serif: await doc.embedFont(StandardFonts.TimesRoman),
-    serifBold: await doc.embedFont(StandardFonts.TimesRomanBold),
+    ...fonts,
     y: PAGE.height,
   };
-  doc.setTitle(`Invoice ${invoice.number}`);
+  doc.setTitle(`${t.invoice} ${invoice.number}`);
   if (settings.business_name) doc.setAuthor(settings.business_name);
 
   const text = (
@@ -57,14 +118,15 @@ export async function generateInvoicePdf(
   ) => {
     const font = opts.font ?? ctx.regular;
     const size = opts.size ?? 9.5;
-    const content = opts.tracking ? str.split('').join(' ') : str; // faux letterspacing for labels
+    const safe = sanitize(str, font);
+    const content = opts.tracking ? safe.split('').join(' ') : safe; // faux letterspacing for labels
     const drawX =
       opts.rightAlignTo !== undefined ? opts.rightAlignTo - font.widthOfTextAtSize(content, size) : x;
     ctx.page.drawText(content, { x: drawX, y: ctx.y, size, font, color: opts.color ?? INK });
   };
 
   const label = (str: string, x: number, rightAlignTo?: number) =>
-    text(str.toUpperCase(), x, { size: 7, font: ctx.bold, color: FAINT, rightAlignTo });
+    text(str.toLocaleUpperCase(tag), x, { size: 7, font: ctx.bold, color: FAINT, rightAlignTo });
 
   const hr = (color = LINE, x1 = MARGIN, x2 = PAGE.width - MARGIN) =>
     ctx.page.drawLine({ start: { x: x1, y: ctx.y }, end: { x: x2, y: ctx.y }, thickness: 0.7, color });
@@ -80,8 +142,14 @@ export async function generateInvoicePdf(
     ctx.page.drawImage(logo, { x: MARGIN, y: ctx.y - 6, width: dims.width, height: dims.height });
     ctx.y -= dims.height + 10;
   }
-  text(settings.business_name || 'Invoice', MARGIN, { size: 22, font: ctx.serifBold });
-  text('INVOICE', 0, { size: 11, font: ctx.bold, color: FAINT, rightAlignTo: COL.amountRight, tracking: true });
+  text(settings.business_name || t.invoice, MARGIN, { size: 22, font: ctx.serifBold });
+  text(t.invoice.toLocaleUpperCase(tag), 0, {
+    size: 11,
+    font: ctx.bold,
+    color: FAINT,
+    rightAlignTo: COL.amountRight,
+    tracking: true,
+  });
   ctx.y -= 15;
   text(invoice.number, 0, { size: 13, font: ctx.serifBold, rightAlignTo: COL.amountRight });
 
@@ -99,15 +167,15 @@ export async function generateInvoicePdf(
   // dates on the right, independent of address height
   const leftEndY = ctx.y;
   ctx.y = headerLeftY;
-  text(`Issued  ${invoice.issue_date}`, 0, { color: SOFT, rightAlignTo: COL.amountRight });
+  text(`${t.issued}  ${date(invoice.issue_date)}`, 0, { color: SOFT, rightAlignTo: COL.amountRight });
   if (invoice.due_date) {
     ctx.y -= 12;
-    text(`Due  ${invoice.due_date}`, 0, { color: SOFT, rightAlignTo: COL.amountRight });
+    text(`${t.due}  ${date(invoice.due_date)}`, 0, { color: SOFT, rightAlignTo: COL.amountRight });
   }
   ctx.y = Math.min(leftEndY, ctx.y) - 24;
 
   // ---- Bill to ----
-  label('Bill to', MARGIN);
+  label(t.billedTo, MARGIN);
   ctx.y -= 14;
   text(invoice.client_name, MARGIN, { size: 11, font: ctx.bold });
   if (invoice.client_email) {
@@ -118,7 +186,7 @@ export async function generateInvoicePdf(
 
   // ---- Subject ----
   if (invoice.subject) {
-    label('Subject', MARGIN);
+    label(t.subject, MARGIN);
     ctx.y -= 14;
     text(truncate(invoice.subject, ctx.serifBold, 11.5, PAGE.width - 2 * MARGIN), MARGIN, {
       size: 11.5,
@@ -138,10 +206,10 @@ export async function generateInvoicePdf(
       color: PAPER_TINT,
     });
     ctx.y += 1;
-    label('Description', COL.desc);
-    label('Qty', 0, COL.qty + 18);
-    label('Unit price', 0, COL.unit + 30);
-    label('Amount', 0, COL.amountRight);
+    label(t.description, COL.desc);
+    label(t.qty, 0, COL.qty + 18);
+    label(t.unitPrice, 0, COL.unit + 30);
+    label(t.amount, 0, COL.amountRight);
     ctx.y -= 7;
     hr(LINE_STRONG, MARGIN - 8, PAGE.width - MARGIN + 8);
     ctx.y -= 16;
@@ -158,8 +226,8 @@ export async function generateInvoicePdf(
     // First description line shares the row with the numbers; extra lines follow
     text(descLines[0], COL.desc);
     text(String(item.quantity), 0, { rightAlignTo: COL.qty + 18, color: SOFT });
-    text(formatCents(item.unit_price_cents, invoice.currency), 0, { rightAlignTo: COL.unit + 30, color: SOFT });
-    text(formatCents(item.amount_cents, invoice.currency), 0, { rightAlignTo: COL.amountRight });
+    text(money(item.unit_price_cents), 0, { rightAlignTo: COL.unit + 30, color: SOFT });
+    text(money(item.amount_cents), 0, { rightAlignTo: COL.amountRight });
     for (const line of descLines.slice(1)) {
       ctx.y -= 12;
       text(line, COL.desc, { color: SOFT, size: 9 });
@@ -176,18 +244,18 @@ export async function generateInvoicePdf(
   }
   ctx.y -= 6;
   const totalsX = COL.qty;
-  text('Subtotal', totalsX, { color: SOFT });
-  text(formatCents(invoice.subtotal_cents, invoice.currency), 0, { rightAlignTo: COL.amountRight });
+  text(t.subtotal, totalsX, { color: SOFT });
+  text(money(invoice.subtotal_cents), 0, { rightAlignTo: COL.amountRight });
   if (invoice.tax_cents > 0) {
     ctx.y -= 15;
-    text(`Tax (${formatTaxRate(invoice.tax_rate_bps)})`, totalsX, { color: SOFT });
-    text(formatCents(invoice.tax_cents, invoice.currency), 0, { rightAlignTo: COL.amountRight });
+    text(`${t.tax} (${formatTaxRate(invoice.tax_rate_bps)})`, totalsX, { color: SOFT });
+    text(money(invoice.tax_cents), 0, { rightAlignTo: COL.amountRight });
   }
   ctx.y -= 10;
   hr(INK, totalsX, COL.amountRight);
   ctx.y -= 18;
-  text('Total', totalsX, { size: 14, font: ctx.serifBold });
-  text(formatCents(invoice.total_cents, invoice.currency), 0, {
+  text(t.total, totalsX, { size: 14, font: ctx.serifBold });
+  text(money(invoice.total_cents), 0, {
     size: 14,
     font: ctx.serifBold,
     rightAlignTo: COL.amountRight,
@@ -195,10 +263,13 @@ export async function generateInvoicePdf(
 
   // ---- Status stamp ----
   if (invoice.status === 'paid' || invoice.status === 'void') {
-    const stamp = invoice.status === 'paid' ? `PAID${invoice.paid_at ? `  ${invoice.paid_at.slice(0, 10)}` : ''}` : 'VOID';
+    const stamp =
+      invoice.status === 'paid'
+        ? `${t.statusPaid}${invoice.paid_at ? `  ${date(invoice.paid_at.slice(0, 10))}` : ''}`
+        : t.statusVoid;
     const color = invoice.status === 'paid' ? GREEN : RUST;
     ctx.y -= 26;
-    const w = ctx.bold.widthOfTextAtSize(stamp, 10) + 20;
+    const w = ctx.bold.widthOfTextAtSize(sanitize(stamp, ctx.bold), 10) + 20;
     ctx.page.drawRectangle({
       x: COL.amountRight - w,
       y: ctx.y - 7,
@@ -215,7 +286,7 @@ export async function generateInvoicePdf(
   // ---- Notes ----
   if (invoice.notes) {
     ctx.y -= 34;
-    label('Notes', MARGIN);
+    label(t.notes, MARGIN);
     ctx.y -= 13;
     for (const line of invoice.notes.split('\n')) {
       if (ctx.y < 90) break;
@@ -231,21 +302,13 @@ export async function generateInvoicePdf(
     ctx.y = 46;
     hr();
     ctx.y = 32;
-    if (payUrl && invoice.status === 'sent') {
-      const msg = `Pay online: ${payUrl}`;
-      text(msg, 0, {
-        size: 8.5,
-        color: SOFT,
-        rightAlignTo: PAGE.width / 2 + ctx.regular.widthOfTextAtSize(msg, 8.5) / 2,
-      });
-    } else {
-      const msg = settings.business_name ? `${settings.business_name} — thank you for your business.` : 'Thank you for your business.';
-      text(msg, 0, {
-        size: 8.5,
-        color: FAINT,
-        rightAlignTo: PAGE.width / 2 + ctx.regular.widthOfTextAtSize(msg, 8.5) / 2,
-      });
-    }
+    const paying = payUrl && invoice.status === 'sent';
+    const msg = paying ? `${t.payOnline} ${payUrl}` : t.footerThanks(settings.business_name || null);
+    text(msg, 0, {
+      size: 8.5,
+      color: paying ? SOFT : FAINT,
+      rightAlignTo: PAGE.width / 2 + ctx.regular.widthOfTextAtSize(sanitize(msg, ctx.regular), 8.5) / 2,
+    });
   }
 
   return doc.save();
@@ -285,7 +348,7 @@ function wrapText(str: string, font: PDFFont, size: number, maxWidth: number): s
     let line = '';
     for (const word of words) {
       const candidate = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(truncate(candidate, font, size, Infinity), size) <= maxWidth) {
+      if (font.widthOfTextAtSize(sanitize(candidate, font), size) <= maxWidth) {
         line = candidate;
       } else {
         if (line) out.push(line);
@@ -300,9 +363,36 @@ function wrapText(str: string, font: PDFFont, size: number, maxWidth: number): s
 // Printable CP1252 characters above Latin-1 — WinAnsi encodes these fine.
 const CP1252_EXTRAS = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ');
 
-/** Helvetica/Times cover WinAnsi only; replace unsupported chars and ellipsize overflow. */
+// Per-font glyph coverage, cached (getCharacterSet walks the font tables).
+const charSets = new WeakMap<PDFFont, Set<number> | null>();
+function fontCharSet(font: PDFFont): Set<number> | null {
+  if (!charSets.has(font)) {
+    try {
+      charSets.set(font, new Set(font.getCharacterSet()));
+    } catch {
+      charSets.set(font, null); // standard fonts: fall back to CP1252 filtering
+    }
+  }
+  return charSets.get(font) ?? null;
+}
+
+/**
+ * Replace characters the font can't draw with '?'. The embedded Noto fonts
+ * cover Latin, Greek, and Cyrillic; the standard-font fallback covers
+ * WinAnsi. Either way the PDF renders instead of pdf-lib throwing on an
+ * unencodable character.
+ */
+function sanitize(str: string, font: PDFFont): string {
+  const set = fontCharSet(font);
+  if (set) {
+    return [...str].map((ch) => (set.has(ch.codePointAt(0)!) || ch === ' ' ? ch : '?')).join('');
+  }
+  return [...str].map((ch) => (ch.charCodeAt(0) <= 0xff || CP1252_EXTRAS.has(ch) ? ch : '?')).join('');
+}
+
+/** Sanitize for the font, then ellipsize overflow to fit the column. */
 function truncate(str: string, font: PDFFont, size: number, maxWidth: number): string {
-  let s = [...str].map((ch) => (ch.charCodeAt(0) <= 0xff || CP1252_EXTRAS.has(ch) ? ch : '?')).join('');
+  let s = sanitize(str, font);
   if (font.widthOfTextAtSize(s, size) <= maxWidth) return s;
   while (s.length > 1 && font.widthOfTextAtSize(s + '…', size) > maxWidth) s = s.slice(0, -1);
   return s + '…';

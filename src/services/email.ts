@@ -1,6 +1,7 @@
 import type { Bindings } from '../env';
 import { getInvoice, getSettings, logInvoiceEvent, type InvoiceWithClient, type Settings } from '../db/queries';
 import { formatCents } from '../lib/money';
+import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
 import { effectiveProviderEnv } from '../lib/providers';
 
 type Mail = {
@@ -100,46 +101,46 @@ export async function sendInvoiceEmail(
 
   const businessName = settings.business_name || 'Minvoice';
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
-  const total = formatCents(invoice.total_cents, invoice.currency);
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const total = formatCentsTag(invoice.total_cents, invoice.currency, tag);
   // No due date -> no due wording at all; don't invent terms like "on receipt".
-  const due = invoice.due_date ? `, due by ${invoice.due_date}` : '';
+  const dueDate = invoice.due_date ? formatDateTag(invoice.due_date, tag) : null;
 
   await deliver(env, settings, {
     to: invoice.client_email,
     fromName: businessName,
     ...(settings.business_email ? { replyTo: settings.business_email } : {}),
-    subject: invoice.subject
-      ? `Invoice ${invoice.number} from ${businessName} — ${invoice.subject} — ${total}`
-      : `Invoice ${invoice.number} from ${businessName} — ${total}`,
+    subject: t.emailInvoiceSubject(invoice.number, businessName, invoice.subject, total),
     text: [
-      `Hi ${invoice.client_name},`,
+      t.greeting(invoice.client_name),
       ``,
-      `${businessName} has sent you invoice ${invoice.number} for ${total}${due}.`,
+      t.emailInvoiceBody(businessName, invoice.number, total, dueDate),
       ``,
-      `View and pay online: ${payUrl}`,
+      `${t.viewAndPay} ${payUrl}`,
       ``,
-      `A PDF copy is attached.`,
+      t.pdfAttached,
     ].join('\n'),
     html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
   <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
-    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">Invoice ${escapeHtml(invoice.number)}${
+    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.invoice)} ${escapeHtml(invoice.number)}${
       invoice.subject ? ` — ${escapeHtml(invoice.subject)}` : ''
     }</p>
-    <p style="font-size: 15px; line-height: 1.6;">Hi ${escapeHtml(invoice.client_name)},</p>
+    <p style="font-size: 15px; line-height: 1.6;">${escapeHtml(t.greeting(invoice.client_name))}</p>
     <p style="font-size: 15px; line-height: 1.6;">
-      You have a new invoice for <strong>${total}</strong>${due}.
-      A PDF copy is attached.
+      ${escapeHtml(t.emailInvoiceBody(businessName, invoice.number, total, dueDate))}
+      ${escapeHtml(t.pdfAttached)}
     </p>
     <p style="margin: 28px 0;">
       <a href="${payUrl}"
          style="background: #1e5b43; color: #fdfdf9; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
-        View &amp; pay invoice
+        ${escapeHtml(t.viewAndPayButton)}
       </a>
     </p>
     <p style="color: #756e61; font-size: 12.5px; line-height: 1.5;">
-      Or copy this link: <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
+      ${escapeHtml(t.orCopyLink)} <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
     </p>
   </div>
 </div>`,
@@ -164,43 +165,44 @@ export async function sendReminderEmail(
 ): Promise<void> {
   if (!invoice.client_email) throw new Error('client has no email address');
   const businessName = settings.business_name || 'Minvoice';
-  const total = formatCents(invoice.total_cents, invoice.currency);
-  const subjectPart = invoice.subject ? ` — ${invoice.subject}` : '';
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const total = formatCentsTag(invoice.total_cents, invoice.currency, tag);
+  const dueDate = formatDateTag(invoice.due_date ?? '', tag);
 
   await deliver(env, settings, {
     to: invoice.client_email,
     fromName: businessName,
     ...(settings.business_email ? { replyTo: settings.business_email } : {}),
-    subject: `Reminder: invoice ${invoice.number}${subjectPart} — ${total} was due ${invoice.due_date}`,
+    subject: t.reminderSubject(invoice.number, invoice.subject, total, dueDate),
     text: [
-      `Hi ${invoice.client_name},`,
+      t.greeting(invoice.client_name),
       ``,
-      `A friendly reminder that invoice ${invoice.number}${subjectPart} for ${total} was due on ${invoice.due_date}.`,
+      t.reminderBody(invoice.number, invoice.subject, total, dueDate),
       ``,
-      `View and pay online: ${payUrl}`,
+      `${t.viewAndPay} ${payUrl}`,
       ``,
-      `If you've already sent payment, please disregard this note. Thank you!`,
+      t.reminderDisregard,
     ].join('\n'),
     html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
   <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
-    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">Payment reminder${
+    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.reminderTitle)}${
       reminderNumber > 1 ? ` (${reminderNumber})` : ''
-    } — Invoice ${escapeHtml(invoice.number)}${escapeHtml(subjectPart)}</p>
-    <p style="font-size: 15px; line-height: 1.6;">Hi ${escapeHtml(invoice.client_name)},</p>
+    } — ${escapeHtml(t.invoice)} ${escapeHtml(invoice.number)}${invoice.subject ? ` — ${escapeHtml(invoice.subject)}` : ''}</p>
+    <p style="font-size: 15px; line-height: 1.6;">${escapeHtml(t.greeting(invoice.client_name))}</p>
     <p style="font-size: 15px; line-height: 1.6;">
-      A friendly reminder that invoice ${escapeHtml(invoice.number)} for <strong>${total}</strong>
-      was due on ${escapeHtml(invoice.due_date ?? '')}.
+      ${escapeHtml(t.reminderBody(invoice.number, invoice.subject, total, dueDate))}
     </p>
     <p style="margin: 28px 0;">
       <a href="${payUrl}"
          style="background: #1e5b43; color: #fdfdf9; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
-        View &amp; pay invoice
+        ${escapeHtml(t.viewAndPayButton)}
       </a>
     </p>
     <p style="color: #756e61; font-size: 12.5px; line-height: 1.5;">
-      If you've already sent payment, please disregard this note. Thank you!
+      ${escapeHtml(t.reminderDisregard)}
     </p>
   </div>
 </div>`,
@@ -225,7 +227,9 @@ export async function sendPaymentReceipt(
   const [invoice, settings] = await Promise.all([getInvoice(db, invoiceId), getSettings(db)]);
   if (!invoice) return;
   if (settings.email_provider === 'none') return; // emails deliberately off
-  const amount = formatCents(info.amountCents, info.currency);
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const amount = formatCentsTag(info.amountCents, info.currency, tag);
   const businessName = settings.business_name || 'Minvoice';
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
 
@@ -234,25 +238,25 @@ export async function sendPaymentReceipt(
         to: invoice.client_email,
         fromName: businessName,
         ...(settings.business_email ? { replyTo: settings.business_email } : {}),
-        subject: `Payment received — Invoice ${invoice.number}`,
+        subject: t.receiptSubject(invoice.number),
         text: [
-          `Hi ${invoice.client_name},`,
+          t.greeting(invoice.client_name),
           ``,
-          `We received your payment of ${amount} for invoice ${invoice.number}. Thank you!`,
+          t.receiptBody(amount, invoice.number),
           ``,
-          `View the paid invoice or download a PDF: ${payUrl}`,
+          `${t.receiptView} ${payUrl}`,
         ].join('\n'),
         html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
   <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
-    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">Invoice ${escapeHtml(invoice.number)} — paid</p>
-    <p style="font-size: 15px; line-height: 1.6;">Hi ${escapeHtml(invoice.client_name)},</p>
+    <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.invoice)} ${escapeHtml(invoice.number)} — ${escapeHtml(t.paid.toLocaleLowerCase(tag))}</p>
+    <p style="font-size: 15px; line-height: 1.6;">${escapeHtml(t.greeting(invoice.client_name))}</p>
     <p style="font-size: 15px; line-height: 1.6;">
-      We received your payment of <strong>${amount}</strong> for invoice ${escapeHtml(invoice.number)}. Thank you!
+      ${escapeHtml(t.receiptBody(amount, invoice.number))}
     </p>
     <p style="color: #756e61; font-size: 12.5px; line-height: 1.5;">
-      View the paid invoice or download a PDF: <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
+      ${escapeHtml(t.receiptView)} <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
     </p>
   </div>
 </div>`,

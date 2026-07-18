@@ -1,4 +1,5 @@
 import { Layout } from '../layout';
+import { SUPPORTED_LOCALES } from '../../lib/strings';
 import { formatTaxRate, isSupportedCurrency } from '../../lib/money';
 import type { Settings } from '../../db/queries';
 import type { KeySource } from '../../lib/providers';
@@ -182,6 +183,30 @@ export function SettingsPage({
             <span class="muted">
               Business time zone — used for "today" defaults, overdue checks, dated invoice numbers, and
               displayed times. Data is stored in UTC.
+            </span>
+          </div>
+
+          <div class="form-group">
+            <label for="locale">Customer language &amp; region</label>
+            <input
+              type="text"
+              id="locale"
+              name="locale"
+              value={settings.locale}
+              list="locale-list"
+              autocomplete="off"
+              placeholder="en, de, es-MX, fr-CA…"
+            />
+            <datalist id="locale-list">
+              {SUPPORTED_LOCALES.map((l) => (
+                <option value={l.tag}>{l.label}</option>
+              ))}
+            </datalist>
+            <span class="muted">
+              Language of everything clients see: invoice emails, the pay page, and the PDF. Built-in:
+              English, Español, Deutsch, Français. A regional tag like de-AT keeps German text with
+              Austrian date/number formatting. Per-client overrides live on each client. The admin stays
+              English.
             </span>
           </div>
 

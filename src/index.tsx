@@ -122,7 +122,7 @@ app.get('/admin/invoices/:id/pdf', async (c) => {
   if (!invoice) return c.notFound();
   const [items, settings] = await Promise.all([getInvoiceItems(c.env.DB, id), getSettings(c.env.DB)]);
   return pdfResponse(
-    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`),
+    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`, c.env.ASSETS),
     `${invoice.number}.pdf`
   );
 });

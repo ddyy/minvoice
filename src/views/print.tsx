@@ -1,6 +1,7 @@
 import { raw } from 'hono/html';
 import type { InvoiceItem, InvoiceWithClient, Settings } from '../db/queries';
-import { formatCents, formatTaxRate } from '../lib/money';
+import { formatTaxRate } from '../lib/money';
+import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
 
 /**
  * Print-optimized invoice document. Deliberately standalone — no app layout,
@@ -19,12 +20,15 @@ export function PrintInvoice({
   payUrl: string;
 }) {
   const cur = invoice.currency;
-  const stamp = invoice.status === 'paid' ? 'PAID' : invoice.status === 'void' ? 'VOID' : null;
+  const tag = resolveLocale(settings.locale, invoice.client_locale);
+  const t = getStrings(tag);
+  const money = (cents: number) => formatCentsTag(cents, cur, tag);
+  const stamp = invoice.status === 'paid' ? t.statusPaid : invoice.status === 'void' ? t.statusVoid : null;
 
   return (
     <>
       {raw('<!DOCTYPE html>')}
-      <html lang="en">
+      <html lang={tag}>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -212,9 +216,9 @@ tr { break-inside: avoid; }
       </head>
       <body>
         <div class="toolbar">
-          <a href={payUrl}>View online</a>
+          <a href={payUrl}>{t.viewOnline}</a>
           <button type="button" onclick="window.print()">
-            Print
+            {t.print}
           </button>
         </div>
         <div class="sheet">
@@ -228,29 +232,29 @@ tr { break-inside: avoid; }
             </div>
           </header>
 
-          <p class="doc-label">Invoice</p>
+          <p class="doc-label">{t.invoice}</p>
           <p class="doc-number">{invoice.number}</p>
           {invoice.subject ? <p class="doc-subject">{invoice.subject}</p> : null}
 
           <dl class="meta">
             <div>
-              <dt>Billed to</dt>
+              <dt>{t.billedTo}</dt>
               <dd>{invoice.client_name}</dd>
             </div>
             <div>
-              <dt>Issued</dt>
-              <dd>{invoice.issue_date}</dd>
+              <dt>{t.issued}</dt>
+              <dd>{formatDateTag(invoice.issue_date, tag)}</dd>
             </div>
             {invoice.due_date ? (
               <div>
-                <dt>Due</dt>
-                <dd>{invoice.due_date}</dd>
+                <dt>{t.due}</dt>
+                <dd>{formatDateTag(invoice.due_date, tag)}</dd>
               </div>
             ) : null}
             {invoice.paid_at ? (
               <div>
-                <dt>Paid</dt>
-                <dd>{invoice.paid_at.slice(0, 10)}</dd>
+                <dt>{t.paid}</dt>
+                <dd>{formatDateTag(invoice.paid_at.slice(0, 10), tag)}</dd>
               </div>
             ) : null}
           </dl>
@@ -258,10 +262,10 @@ tr { break-inside: avoid; }
           <table>
             <thead>
               <tr>
-                <th>Description</th>
-                <th class="num">Qty</th>
-                <th class="num">Unit price</th>
-                <th class="num">Amount</th>
+                <th>{t.description}</th>
+                <th class="num">{t.qty}</th>
+                <th class="num">{t.unitPrice}</th>
+                <th class="num">{t.amount}</th>
               </tr>
             </thead>
             <tbody>
@@ -269,8 +273,8 @@ tr { break-inside: avoid; }
                 <tr>
                   <td class="desc">{it.description}</td>
                   <td class="num dim">{it.quantity}</td>
-                  <td class="num dim">{formatCents(it.unit_price_cents, cur)}</td>
-                  <td class="num">{formatCents(it.amount_cents, cur)}</td>
+                  <td class="num dim">{money(it.unit_price_cents)}</td>
+                  <td class="num">{money(it.amount_cents)}</td>
                 </tr>
               ))}
             </tbody>
@@ -278,38 +282,38 @@ tr { break-inside: avoid; }
 
           <div class="totals">
             <div class="totals-row">
-              <span>Subtotal</span>
-              <span>{formatCents(invoice.subtotal_cents, cur)}</span>
+              <span>{t.subtotal}</span>
+              <span>{money(invoice.subtotal_cents)}</span>
             </div>
             {invoice.tax_cents > 0 ? (
               <div class="totals-row">
-                <span>Tax ({formatTaxRate(invoice.tax_rate_bps)})</span>
-                <span>{formatCents(invoice.tax_cents, cur)}</span>
+                <span>{t.tax} ({formatTaxRate(invoice.tax_rate_bps)})</span>
+                <span>{money(invoice.tax_cents)}</span>
               </div>
             ) : null}
             <div class="totals-final">
-              <span>Total</span>
-              <span>{formatCents(invoice.total_cents, cur)}</span>
+              <span>{t.total}</span>
+              <span>{money(invoice.total_cents)}</span>
             </div>
           </div>
 
           {invoice.notes ? (
             <div class="notes">
-              <span class="notes-label">Notes</span>
+              <span class="notes-label">{t.notes}</span>
               <p>{invoice.notes}</p>
             </div>
           ) : null}
 
           {invoice.status === 'sent' ? (
             <div class="pay-footer">
-              Pay online: <a href={payUrl}>{payUrl}</a>
+              {t.payOnline} <a href={payUrl}>{payUrl}</a>
             </div>
           ) : null}
         </div>
         <script
           dangerouslySetInnerHTML={{
             __html: `
-// ?auto=1 (the "Print" buttons elsewhere in the app) opens the dialog
+// ?auto=1 (the {t.print} buttons elsewhere in the app) opens the dialog
 // immediately — but only after fonts load, so the paper copy isn't Georgia.
 if (new URLSearchParams(location.search).get('auto') === '1') {
   document.fonts.ready.then(function () { setTimeout(function () { window.print(); }, 50); });
