@@ -1,6 +1,6 @@
 import { PDFDocument, PDFFont, StandardFonts, rgb } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
-import type { InvoiceItem, InvoiceWithClient, Settings } from '../db/queries';
+import type { InvoiceItem, InvoiceWithClient, Logo, Settings } from '../db/queries';
 import { formatTaxRate } from '../lib/money';
 import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
 
@@ -87,7 +87,8 @@ export async function generateInvoicePdf(
   items: InvoiceItem[],
   settings: Settings,
   payUrl?: string,
-  assets?: Fetcher
+  assets?: Fetcher,
+  logo?: Logo | null
 ): Promise<Uint8Array> {
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
@@ -136,10 +137,10 @@ export async function generateInvoicePdf(
 
   // ---- Header: identity left, document meta right ----
   ctx.y = PAGE.height - 64;
-  const logo = await tryEmbedLogo(doc, settings.logo_url);
-  if (logo) {
-    const dims = logo.scaleToFit(110, 36);
-    ctx.page.drawImage(logo, { x: MARGIN, y: ctx.y - 6, width: dims.width, height: dims.height });
+  const logoImage = await tryEmbedLogo(doc, logo ?? settings.logo_url);
+  if (logoImage) {
+    const dims = logoImage.scaleToFit(110, 36);
+    ctx.page.drawImage(logoImage, { x: MARGIN, y: ctx.y - 6, width: dims.width, height: dims.height });
     ctx.y -= dims.height + 10;
   }
   text(settings.business_name || t.invoice, MARGIN, { size: 22, font: ctx.serifBold });
@@ -323,10 +324,14 @@ export function pdfResponse(bytes: Uint8Array, filename: string): Response {
   });
 }
 
-async function tryEmbedLogo(doc: PDFDocument, url: string | null) {
-  if (!url) return null;
+/** Uploaded logo bytes (preferred) or a settings URL to fetch — either may fail without blocking the invoice. */
+async function tryEmbedLogo(doc: PDFDocument, source: Logo | string | null) {
+  if (!source) return null;
   try {
-    const res = await fetch(url);
+    if (typeof source !== 'string') {
+      return source.mime === 'image/png' ? await doc.embedPng(source.bytes) : await doc.embedJpg(source.bytes);
+    }
+    const res = await fetch(source);
     if (!res.ok) return null;
     const bytes = await res.arrayBuffer();
     const type = res.headers.get('content-type') ?? '';

@@ -47,6 +47,7 @@ export function SettingsPage({
   curKept,
   numKept,
   providerMeta,
+  hasLogo,
 }: {
   currentPath: string;
   settings: Settings;
@@ -55,6 +56,7 @@ export function SettingsPage({
   curKept?: boolean;
   numKept?: boolean;
   providerMeta: ProviderFieldMeta;
+  hasLogo?: boolean;
 }) {
   const { sources, hints } = providerMeta;
   const taxRatePercent = (settings.tax_rate_bps / 100).toFixed(2);
@@ -91,7 +93,7 @@ export function SettingsPage({
         <a href="#payments">Payments</a>
       </nav>
 
-      <form method="post" action="/admin/settings">
+      <form method="post" action="/admin/settings" enctype="multipart/form-data">
         <div class="card" id="business">
           <h2>Business</h2>
           <div class="form-group">
@@ -116,8 +118,27 @@ export function SettingsPage({
           </div>
 
           <div class="form-group">
-            <label for="logo_url">Logo URL</label>
+            <label for="logo_file">Logo</label>
+            {hasLogo ? (
+              <p class="muted">
+                <img src="/logo" alt="Current logo" style="max-height: 36px; vertical-align: middle;" /> Current
+                uploaded logo.{' '}
+                <label style="font-weight: normal;">
+                  <input type="checkbox" name="remove_logo" value="1" /> Remove it
+                </label>
+              </p>
+            ) : null}
+            <input type="file" id="logo_file" name="logo_file" accept="image/png,image/jpeg" />
+            <span class="muted">
+              PNG or JPEG, up to 500 KB — stored in your database and shown on the PDF. Uploading replaces
+              the previous one.
+            </span>
+          </div>
+
+          <div class="form-group">
+            <label for="logo_url">Logo URL (alternative)</label>
             <input type="text" id="logo_url" name="logo_url" value={settings.logo_url ?? ''} />
+            <span class="muted">Used only when no logo is uploaded.</span>
           </div>
 
           <div class="actions">

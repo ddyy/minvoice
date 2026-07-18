@@ -992,6 +992,34 @@ export async function markInvoicePaidFromWebhook(
   return transitioned ? 'paid' : 'recorded';
 }
 
+// ---------- Logo (uploaded, stored in D1; wins over settings.logo_url) ----------
+
+export type Logo = { bytes: Uint8Array; mime: string; updated_at: string };
+
+export async function getLogo(db: D1Database): Promise<Logo | null> {
+  const row = await db
+    .prepare('SELECT bytes, mime, updated_at FROM logo WHERE id = 1')
+    .first<{ bytes: ArrayBuffer | number[]; mime: string; updated_at: string }>();
+  if (!row) return null;
+  // D1 returns BLOBs as ArrayBuffer (or a number[] via the JSON path) — normalize.
+  const bytes = row.bytes instanceof ArrayBuffer ? new Uint8Array(row.bytes) : Uint8Array.from(row.bytes);
+  return { bytes, mime: row.mime, updated_at: row.updated_at };
+}
+
+export async function setLogo(db: D1Database, bytes: Uint8Array, mime: 'image/png' | 'image/jpeg'): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO logo (id, bytes, mime, updated_at) VALUES (1, ?, ?, datetime('now'))
+       ON CONFLICT (id) DO UPDATE SET bytes = excluded.bytes, mime = excluded.mime, updated_at = datetime('now')`
+    )
+    .bind(bytes, mime)
+    .run();
+}
+
+export async function deleteLogo(db: D1Database): Promise<void> {
+  await db.prepare('DELETE FROM logo WHERE id = 1').run();
+}
+
 // ---------- Email outbox (durable side-effect delivery) ----------
 
 export type OutboxKind = 'payment_receipt' | 'paid_notice' | 'reminder';

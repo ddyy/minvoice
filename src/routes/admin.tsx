@@ -10,6 +10,8 @@ import {
   buildTimeline,
   completeSetup,
   createClient,
+  deleteLogo,
+  getLogo,
   createInvoice,
   deleteInvoice,
   deleteViewEvent,
@@ -33,6 +35,7 @@ import {
   undoPayment,
   updatePaymentNote,
   setInvoiceStatus,
+  setLogo,
   updateClient,
   updateInvoice,
   setNextInvoiceNumber,
@@ -446,7 +449,7 @@ admin.post('/invoices/:id/status', async (c) => {
           }
           try {
             const [items, settings] = await Promise.all([getInvoiceItems(c.env.DB, id), getSettings(c.env.DB)]);
-            const pdf = await generateInvoicePdf(invoice, items, settings, undefined, c.env.ASSETS);
+            const pdf = await generateInvoicePdf(invoice, items, settings, undefined, c.env.ASSETS, await getLogo(c.env.DB));
             await sendInvoiceEmail(c.env, invoice, settings, pdf);
           } catch (e) {
             console.error('invoice email failed', e);
@@ -780,13 +783,26 @@ admin.get('/settings', async (c) => {
       curKept={curKept}
       numKept={numKept}
       providerMeta={providerMeta}
+      hasLogo={!!(await getLogo(c.env.DB))}
     />
   );
 });
 
 admin.post('/settings', async (c) => {
-  const body = (await c.req.parseBody()) as Record<string, string>;
+  const raw = await c.req.parseBody();
+  const body = raw as Record<string, string>;
   const current = await getSettings(c.env.DB);
+
+  // Logo: uploaded file (stored in D1, wins over the URL) or explicit removal.
+  const logoFile = raw.logo_file;
+  if (logoFile instanceof File && logoFile.size > 0) {
+    const mime = logoFile.type === 'image/png' ? 'image/png' : logoFile.type === 'image/jpeg' ? 'image/jpeg' : null;
+    if (!mime) return c.text('Logo must be a PNG or JPEG.', 400);
+    if (logoFile.size > 500 * 1024) return c.text('Logo must be under 500 KB.', 400);
+    await setLogo(c.env.DB, new Uint8Array(await logoFile.arrayBuffer()), mime);
+  } else if (body.remove_logo) {
+    await deleteLogo(c.env.DB);
+  }
   const taxRateBps = Math.round(parseFloat(body.tax_rate_percent) * 100);
   // A typo in the free-text timezone keeps the previous value, never resets to UTC.
   const tzValid = !!body.timezone && isValidTimezone(body.timezone);

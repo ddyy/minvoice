@@ -10,6 +10,7 @@ import {
   clearLoginAttempts,
   getInvoice,
   getInvoiceItems,
+  getLogo,
   getSettings,
   purgeOldLoginAttempts,
   purgeOldOutbox,
@@ -111,6 +112,19 @@ app.get('/health', async (c) => {
   }
 });
 
+// Uploaded business logo (public: appears on client-facing pages and emails).
+app.get('/logo', async (c) => {
+  const logo = await getLogo(c.env.DB);
+  if (!logo) return c.notFound();
+  return new Response(logo.bytes as unknown as BodyInit, {
+    headers: {
+      'Content-Type': logo.mime,
+      'Cache-Control': 'public, max-age=300',
+      'X-Robots-Tag': 'noindex',
+    },
+  });
+});
+
 // Admin: Cloudflare Access at the edge + JWT verification here (defense in depth).
 app.use('/admin/*', accessMiddleware);
 
@@ -120,9 +134,13 @@ app.get('/admin/invoices/:id/pdf', async (c) => {
   if (!Number.isInteger(id)) return c.notFound();
   const invoice = await getInvoice(c.env.DB, id);
   if (!invoice) return c.notFound();
-  const [items, settings] = await Promise.all([getInvoiceItems(c.env.DB, id), getSettings(c.env.DB)]);
+  const [items, settings, logo] = await Promise.all([
+    getInvoiceItems(c.env.DB, id),
+    getSettings(c.env.DB),
+    getLogo(c.env.DB),
+  ]);
   return pdfResponse(
-    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`, c.env.ASSETS),
+    await generateInvoicePdf(invoice, items, settings, `${c.env.APP_BASE_URL}/pay/${invoice.public_token}`, c.env.ASSETS, logo),
     `${invoice.number}.pdf`
   );
 });

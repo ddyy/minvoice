@@ -53,7 +53,8 @@ Everything beyond the Worker itself is optional:
   logged to the invoice history and delivered through a durable outbox that retries failures
 - **Admin** — dashboard with status tabs and client filter, payments list, monthly reports
   (filterable by client), CSV export,
-  first-launch setup wizard, configuration warnings for missing secrets
+  first-launch setup wizard, configuration warnings for missing secrets, and logo upload
+  (PNG/JPEG stored in your database — no external image host needed; a logo URL still works)
 - **No fees** — fits Cloudflare's free tier (Resend's free tier covers email there), so there's
   no monthly cost to run. No subscription and no added payment fees on any plan: you pay only
   Stripe's or PayPal's own rate (2.9% + 30¢ on card), straight to your own account. Nothing sits
