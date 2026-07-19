@@ -32,6 +32,7 @@ import {
 } from './lib/admin-auth';
 import { resolveBaseUrl } from './lib/base-url';
 import { deleteCookie, setCookie } from 'hono/cookie';
+import { bodyLimit } from 'hono/body-limit';
 
 const app = new Hono<AppEnv>();
 
@@ -45,6 +46,16 @@ app.use('*', async (c, next) => {
 });
 
 app.get('/', (c) => c.redirect('/admin'));
+
+// Cap admin request bodies BEFORE any handler buffers them: the largest
+// legitimate admin body is the 500 KB logo upload plus multipart overhead.
+// Without this, parseBody() would buffer arbitrarily large uploads into
+// Worker memory before the size check runs. Webhooks are deliberately not
+// capped — provider payload sizes are theirs to choose.
+app.use(
+  '/admin/*',
+  bodyLimit({ maxSize: 1024 * 1024, onError: (c) => c.text('Request body too large (1 MB limit).', 413) })
+);
 
 // CSRF: reject cross-site state-changing requests to any admin route (incl.
 // login). Registered before the routes below so it covers them all.

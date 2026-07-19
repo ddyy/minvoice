@@ -44,11 +44,20 @@ const item = (description: string): InvoiceItem => ({
 });
 
 describe('PDF generation with embedded fonts', () => {
-  it('renders a German-locale invoice with umlauts and euro formatting', async () => {
+  it('German umlauts render via the FAST WinAnsi path (no font embedding)', async () => {
     const settings = { ...(await getSettings(DB)), locale: 'de', business_name: 'Größenwahn Bücher' };
     const bytes = await generateInvoicePdf(fakeInvoice(), [item('Beratung für Änderungswünsche')], settings, undefined, env.ASSETS);
     expect(bytes.length).toBeGreaterThan(1000);
     expect(String.fromCharCode(...bytes.slice(0, 5))).toBe('%PDF-');
+    // Umlauts/€ are WinAnsi: built-in fonts suffice, keeping CPU ~3.5ms
+    // (Workers Free cap is 10ms) — a small PDF proves no Noto embedding ran.
+    expect(bytes.length).toBeLessThan(15000);
+  });
+
+  it('French Intl number formatting stays on the fast path (narrow spaces normalized)', async () => {
+    const settings = { ...(await getSettings(DB)), locale: 'fr' };
+    const bytes = await generateInvoicePdf(fakeInvoice({ client_locale: 'fr' }), [item('Prestation de conseil détaillée')], settings, undefined, env.ASSETS);
+    expect(bytes.length).toBeLessThan(15000);
   });
 
   it('renders extended-Latin and Cyrillic with the REAL Noto fonts, not the fallback', async () => {
@@ -65,6 +74,25 @@ describe('PDF generation with embedded fonts', () => {
     // ~18KB+ to the document; the WinAnsi standard-font fallback stays ~5KB.
     // (Font names aren't greppable — pdf-lib compresses object streams.)
     expect(bytes.length).toBeGreaterThan(15000);
+  });
+
+  it('Turkish uppercasing (dotted İ) forces the Unicode fonts even for ASCII source text', async () => {
+    // labels are uppercased with the locale: 'Billed to' -> 'BİLLED TO' (İ is not WinAnsi)
+    const settings = { ...(await getSettings(DB)), locale: 'tr' };
+    const bytes = await generateInvoicePdf(fakeInvoice(), [item('Plain ascii item')], settings, undefined, env.ASSETS);
+    expect(bytes.length).toBeGreaterThan(15000); // Noto path
+  });
+
+  it('a Polish paid-date (paz\u0301dziernik) on the PAID stamp forces the Unicode fonts', async () => {
+    const settings = { ...(await getSettings(DB)), locale: 'pl' };
+    const bytes = await generateInvoicePdf(
+      fakeInvoice({ status: 'paid', paid_at: '2026-10-18 12:00:00' }),
+      [item('Plain ascii item')],
+      settings,
+      undefined,
+      env.ASSETS
+    );
+    expect(bytes.length).toBeGreaterThan(15000); // '18 paz\u0301 2026' needs Noto
   });
 
   it('per-client locale override wins over the business locale', async () => {

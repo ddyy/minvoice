@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../env';
 import { formatCents, isSupportedCurrency, parseAmountToCents } from '../lib/money';
 import { addDaysISO, isValidTimezone, todayInTz } from '../lib/dates';
-import { configWarnings } from '../lib/config';
+import { configWarnings, secretConfigured } from '../lib/config';
+import { accentUsable, safeAccent } from '../lib/color';
 import { keySource } from '../lib/providers';
 import { isLocalRequest } from '../lib/admin-auth';
 import { parseSchedule } from '../lib/reminders';
@@ -47,7 +48,7 @@ import {
 } from '../db/queries';
 import { DashboardPage, INVOICE_FILTERS, type InvoiceFilter } from '../views/admin/dashboard';
 import { generateInvoicePdf } from '../services/pdf';
-import { sendInvoiceEmail } from '../services/email';
+import { sendInvoiceEmail, sendTestEmail } from '../services/email';
 import { InvoiceFormPage } from '../views/admin/invoice-form';
 import { InvoiceDetailPage } from '../views/admin/invoice-detail';
 import { ClientEditPage, ClientNewPage, ClientsPage } from '../views/admin/clients';
@@ -113,6 +114,7 @@ admin.post('/setup', async (c) => {
     default_rate_cents: (values.default_rate && parseAmountToCents(values.default_rate)) || 0,
     timezone: values.timezone,
     locale: 'en',
+    accent_color: '#1e5b43',
     // No send_email binding (zero-config deploys) -> Resend is the workable provider
     email_provider: c.env.EMAIL ? 'cloudflare' : 'resend',
     email_from: '',
@@ -125,6 +127,11 @@ admin.post('/setup', async (c) => {
 /** A plausible BCP-47 tag like 'en', 'de-AT', 'fr-CA' (strings fall back to English for unknown languages). */
 function validLocaleTag(v: string | undefined): v is string {
   return !!v && /^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$/.test(v.trim());
+}
+
+/** The submitted locale: the select's value, or the free-text field when "Custom tag…" was chosen. */
+function submittedLocale(body: Record<string, string>): string | undefined {
+  return body.locale === '__custom__' ? body.locale_custom : body.locale;
 }
 
 /** Normalize a parseBody({ all: true }) field into a string[]. */
@@ -225,7 +232,9 @@ admin.get('/', async (c) => {
       clientId={clientId}
       deleted={c.req.query('deleted')}
       today={todayInTz(settings.timezone)}
-      warnings={configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })}
+      warnings={configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })
+        .filter((w) => w.category !== 'auth')
+        .map((w) => w.text)}
       currentPath="/admin"
     />
   );
@@ -584,7 +593,7 @@ admin.post('/clients', async (c) => {
     address: body.address || null,
     default_rate_cents: body.default_rate ? parseAmountToCents(body.default_rate) : null,
     payment_terms_days: body.payment_terms_days?.trim() ? Math.max(0, parseInt(body.payment_terms_days, 10) || 0) : null,
-    locale: validLocaleTag(body.locale) ? body.locale.trim() : null,
+    locale: validLocaleTag(submittedLocale(body)) ? submittedLocale(body)!.trim() : null,
   });
   return c.redirect('/admin/clients');
 });
@@ -617,7 +626,7 @@ admin.post('/clients/:id', async (c) => {
     archived: body.archived ? 1 : 0,
     default_rate_cents: body.default_rate ? parseAmountToCents(body.default_rate) : null,
     payment_terms_days: body.payment_terms_days?.trim() ? Math.max(0, parseInt(body.payment_terms_days, 10) || 0) : null,
-    locale: validLocaleTag(body.locale) ? body.locale.trim() : null,
+    locale: validLocaleTag(submittedLocale(body)) ? submittedLocale(body)!.trim() : null,
   });
 
   return c.redirect('/admin/clients');
@@ -756,6 +765,10 @@ admin.get('/settings', async (c) => {
   const tzKept = c.req.query('tz_kept') === '1';
   const curKept = c.req.query('cur_kept') === '1';
   const numKept = c.req.query('num_kept') === '1';
+  const emailTestOk = c.req.query('email_test') ?? null;
+  const emailTestErr = c.req.query('email_test_err') ?? null;
+  const resendKept = c.req.query('resend_kept') === '1';
+  const accentKeptQ = c.req.query('accent_kept') === '1';
   const tail = (v: string) => (v ? v.slice(-4) : '');
   const providerMeta = {
     sources: {
@@ -784,6 +797,11 @@ admin.get('/settings', async (c) => {
       numKept={numKept}
       providerMeta={providerMeta}
       hasLogo={!!(await getLogo(c.env.DB))}
+      emailTestOk={emailTestOk}
+      emailTestErr={emailTestErr}
+      resendKept={resendKept}
+      accentKept={accentKeptQ}
+      alerts={configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })}
     />
   );
 });
@@ -810,6 +828,7 @@ admin.post('/settings', async (c) => {
   const nextNum = parseInt(body.next_invoice_number, 10);
   const numValid = Number.isInteger(nextNum) && nextNum >= 1;
 
+  const accentKept = !!body.accent_color && !accentUsable(body.accent_color);
   await updateSettings(c.env.DB, {
     business_name: body.business_name,
     business_address: body.business_address,
@@ -820,7 +839,8 @@ admin.post('/settings', async (c) => {
     invoice_prefix: body.invoice_prefix,
     default_rate_cents: (body.default_rate && parseAmountToCents(body.default_rate)) || 0,
     timezone: tzValid ? body.timezone : current.timezone,
-    locale: validLocaleTag(body.locale) ? body.locale.trim() : current.locale,
+    locale: validLocaleTag(submittedLocale(body)) ? submittedLocale(body)!.trim() : current.locale,
+    accent_color: accentUsable(body.accent_color) ? safeAccent(body.accent_color) : current.accent_color,
     // Email settings live in their own card/form — preserve as-is here
     email_provider: current.email_provider,
     email_from: current.email_from,
@@ -831,7 +851,7 @@ admin.post('/settings', async (c) => {
   }
 
   return c.redirect(
-    `/admin/settings?saved=1${tzValid ? '' : '&tz_kept=1'}${curValid ? '' : '&cur_kept=1'}${
+    `/admin/settings?saved=1${accentKept ? '&accent_kept=1' : ''}${tzValid ? '' : '&tz_kept=1'}${curValid ? '' : '&cur_kept=1'}${
       numValid ? '' : '&num_kept=1'
     }`
   );
@@ -839,18 +859,36 @@ admin.post('/settings', async (c) => {
 
 admin.post('/settings/email', async (c) => {
   const body = (await c.req.parseBody()) as Record<string, string>;
+  const current = await getSettings(c.env.DB);
+  const submittedKey = (body.resend_api_key ?? '').trim(); // masked field: blank = keep stored
+  let provider: 'resend' | 'none' | 'cloudflare' =
+    body.email_provider === 'resend' ? 'resend' : body.email_provider === 'none' ? 'none' : 'cloudflare';
+  // Resend without ANY key (submitted, stored, or env secret) would make every
+  // email fail — keep the previous provider instead of saving a broken config.
+  const resendKeyAvailable =
+    secretConfigured(submittedKey) || secretConfigured(current.resend_api_key) || secretConfigured(c.env.RESEND_API_KEY);
+  const resendKept = provider === 'resend' && !resendKeyAvailable;
+  if (resendKept) provider = current.email_provider;
+
   await updateEmailSettings(c.env.DB, {
-    email_provider:
-      body.email_provider === 'resend' ? 'resend' : body.email_provider === 'none' ? 'none' : 'cloudflare',
+    email_provider: provider,
     email_from: (body.email_from ?? '').trim(),
     reminders_enabled: body.reminders_enabled ? 1 : 0,
     // Normalized on save so the cron and the UI always agree on the cadence
     reminder_schedule: parseSchedule(body.reminder_schedule ?? '').join(', '),
   });
-  // Masked field: blank means keep the stored key
-  const resendKey = (body.resend_api_key ?? '').trim();
-  if (resendKey) await setResendApiKey(c.env.DB, resendKey);
-  return c.redirect('/admin/settings?saved=1');
+  if (submittedKey) await setResendApiKey(c.env.DB, submittedKey);
+  return c.redirect(resendKept ? '/admin/settings?saved=1&resend_kept=1' : '/admin/settings?saved=1');
+});
+
+admin.post('/settings/test-email', async (c) => {
+  try {
+    const to = await sendTestEmail(c.env, c.env.DB);
+    return c.redirect(`/admin/settings?email_test=${encodeURIComponent(to)}`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return c.redirect(`/admin/settings?email_test_err=${encodeURIComponent(msg.slice(0, 200))}`);
+  }
 });
 
 admin.post('/settings/providers', async (c) => {

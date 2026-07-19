@@ -17,6 +17,7 @@ export type Settings = {
   default_rate_cents: number; // 0 = no default
   timezone: string; // IANA name; storage stays UTC
   locale: string; // BCP-47 tag for customer-facing language + formatting
+  accent_color: string; // brand accent hex for emails + PDF
   email_provider: 'cloudflare' | 'resend' | 'none';
   email_from: string;
   reminders_enabled: number;
@@ -140,7 +141,7 @@ export async function updateSettings(
     .prepare(
       `UPDATE settings SET business_name = ?, business_address = ?, business_email = ?,
        logo_url = ?, currency = ?, tax_rate_bps = ?, invoice_prefix = ?, default_rate_cents = ?, timezone = ?,
-       locale = ?, email_provider = ?, email_from = ?, payment_terms_days = ?
+       locale = ?, accent_color = ?, email_provider = ?, email_from = ?, payment_terms_days = ?
        WHERE id = 1`
     )
     .bind(
@@ -154,6 +155,7 @@ export async function updateSettings(
       s.default_rate_cents,
       s.timezone,
       s.locale,
+      s.accent_color,
       s.email_provider,
       s.email_from,
       s.payment_terms_days

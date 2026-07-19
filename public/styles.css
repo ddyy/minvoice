@@ -1584,3 +1584,50 @@ html {
   max-width: 40ch;
   margin: 0 auto;
 }
+
+/* Uploaded-logo preview (Settings): thumbnail + caption + remove toggle */
+.logo-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0.5rem 0.85rem;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.logo-preview img {
+  display: block;
+  max-height: 40px;
+  max-width: 160px;
+}
+.form-group label.logo-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.5rem;
+  font-weight: normal;
+  font-size: 0.85rem;
+  color: var(--rust);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.logo-remove input {
+  accent-color: var(--rust);
+}
+
+/* Settings -> Alerts: configuration warnings list */
+.settings-alerts {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.settings-alerts li {
+  color: var(--amber);
+  margin-bottom: 0.4rem;
+  line-height: 1.45;
+}
+.settings-alerts li:last-child {
+  margin-bottom: 0;
+}

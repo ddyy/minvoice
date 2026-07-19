@@ -15,9 +15,17 @@ describe('resolveBaseUrl', () => {
     expect(
       resolveBaseUrl('http://localhost:8787', 'https://minvoice.acme.workers.dev/pay/t', false)
     ).toBe('https://minvoice.acme.workers.dev');
-    // still honored when actually developing locally
+    // matching local port passes through unchanged
     expect(resolveBaseUrl('http://localhost:8787', 'http://localhost:8787/pay/t', true)).toBe(
       'http://localhost:8787'
+    );
+    // MISMATCHED local port: the request origin wins — dev servers move
+    // between ports and a pinned base would emit links to the wrong one
+    expect(resolveBaseUrl('http://localhost:8787', 'http://localhost:8788/pay/t', true)).toBe(
+      'http://localhost:8788'
+    );
+    expect(resolveBaseUrl('http://localhost:8787', 'http://127.0.0.1:9000/x', true)).toBe(
+      'http://127.0.0.1:9000'
     );
     // wrangler dev emulates the route host in request.url — the localhost
     // base must survive even though the URL looks like production

@@ -1,7 +1,10 @@
 import type { Bindings } from '../env';
-import { getInvoice, getSettings, logInvoiceEvent, type InvoiceWithClient, type Settings } from '../db/queries';
-import { formatCents } from '../lib/money';
+import { getInvoice, getLogo, getSettings, logInvoiceEvent, type InvoiceItem, type InvoiceWithClient, type Settings } from '../db/queries';
+import { computeTotals, formatCents } from '../lib/money';
+import { addDaysISO, todayInTz } from '../lib/dates';
+import { generateInvoicePdf } from './pdf';
 import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
+import { accentForeground, safeAccent } from '../lib/color';
 import { effectiveProviderEnv } from '../lib/providers';
 
 type Mail = {
@@ -103,6 +106,8 @@ export async function sendInvoiceEmail(
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
+  const accent = safeAccent(settings.accent_color);
+  const accentFg = accentForeground(accent);
   const total = formatCentsTag(invoice.total_cents, invoice.currency, tag);
   // No due date -> no due wording at all; don't invent terms like "on receipt".
   const dueDate = invoice.due_date ? formatDateTag(invoice.due_date, tag) : null;
@@ -123,7 +128,7 @@ export async function sendInvoiceEmail(
     ].join('\n'),
     html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
-  <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
+  <div style="border-top: 3px solid ${accent}; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
     <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.invoice)} ${escapeHtml(invoice.number)}${
       invoice.subject ? ` — ${escapeHtml(invoice.subject)}` : ''
@@ -135,12 +140,12 @@ export async function sendInvoiceEmail(
     </p>
     <p style="margin: 28px 0;">
       <a href="${payUrl}"
-         style="background: #1e5b43; color: #fdfdf9; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
+         style="background: ${accent}; color: ${accentFg}; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
         ${escapeHtml(t.viewAndPayButton)}
       </a>
     </p>
     <p style="color: #756e61; font-size: 12.5px; line-height: 1.5;">
-      ${escapeHtml(t.orCopyLink)} <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
+      ${escapeHtml(t.orCopyLink)} <a href="${payUrl}" style="color: ${accent};">${payUrl}</a>
     </p>
   </div>
 </div>`,
@@ -167,6 +172,8 @@ export async function sendReminderEmail(
   const businessName = settings.business_name || 'Minvoice';
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
+  const accent = safeAccent(settings.accent_color);
+  const accentFg = accentForeground(accent);
   const total = formatCentsTag(invoice.total_cents, invoice.currency, tag);
   const dueDate = formatDateTag(invoice.due_date ?? '', tag);
 
@@ -186,7 +193,7 @@ export async function sendReminderEmail(
     ].join('\n'),
     html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
-  <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
+  <div style="border-top: 3px solid ${accent}; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
     <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.reminderTitle)}${
       reminderNumber > 1 ? ` (${reminderNumber})` : ''
@@ -197,7 +204,7 @@ export async function sendReminderEmail(
     </p>
     <p style="margin: 28px 0;">
       <a href="${payUrl}"
-         style="background: #1e5b43; color: #fdfdf9; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
+         style="background: ${accent}; color: ${accentFg}; text-decoration: none; padding: 12px 24px; border-radius: 5px; font-family: -apple-system, sans-serif; font-size: 15px;">
         ${escapeHtml(t.viewAndPayButton)}
       </a>
     </p>
@@ -229,6 +236,7 @@ export async function sendPaymentReceipt(
   if (settings.email_provider === 'none') return; // emails deliberately off
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
+  const accent = safeAccent(settings.accent_color);
   const amount = formatCentsTag(info.amountCents, info.currency, tag);
   const businessName = settings.business_name || 'Minvoice';
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
@@ -248,7 +256,7 @@ export async function sendPaymentReceipt(
         ].join('\n'),
         html: `
 <div style="font-family: Georgia, 'Times New Roman', serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
-  <div style="border-top: 3px solid #1e5b43; padding: 28px 4px 8px;">
+  <div style="border-top: 3px solid ${accent}; padding: 28px 4px 8px;">
     <h1 style="font-size: 22px; margin: 0 0 4px;">${escapeHtml(businessName)}</h1>
     <p style="color: #6b6459; margin: 0 0 24px; font-size: 14px;">${escapeHtml(t.invoice)} ${escapeHtml(invoice.number)} — ${escapeHtml(t.paid.toLocaleLowerCase(tag))}</p>
     <p style="font-size: 15px; line-height: 1.6;">${escapeHtml(t.greeting(invoice.client_name))}</p>
@@ -256,7 +264,7 @@ export async function sendPaymentReceipt(
       ${escapeHtml(t.receiptBody(amount, invoice.number))}
     </p>
     <p style="color: #756e61; font-size: 12.5px; line-height: 1.5;">
-      ${escapeHtml(t.receiptView)} <a href="${payUrl}" style="color: #1e5b43;">${payUrl}</a>
+      ${escapeHtml(t.receiptView)} <a href="${payUrl}" style="color: ${accent};">${payUrl}</a>
     </p>
   </div>
 </div>`,
@@ -278,6 +286,7 @@ export async function sendPaidNotice(
   const [invoice, settings] = await Promise.all([getInvoice(db, invoiceId), getSettings(db)]);
   if (!invoice) return;
   if (settings.email_provider === 'none') return;
+  const accent = safeAccent(settings.accent_color);
   const amount = formatCents(info.amountCents, info.currency);
 
   if (settings.business_email) {
@@ -294,10 +303,72 @@ export async function sendPaidNotice(
 <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; color: #1d1a15;">
   <p style="font-size: 16px;">🎉 <strong>${escapeHtml(invoice.client_name)}</strong> paid invoice
     <strong>${escapeHtml(invoice.number)}</strong>: <strong>${amount}</strong> via ${escapeHtml(info.provider)}.</p>
-  <p><a href="${env.APP_BASE_URL}/admin/invoices/${invoice.id}" style="color: #1e5b43;">Open the invoice</a></p>
+  <p><a href="${env.APP_BASE_URL}/admin/invoices/${invoice.id}" style="color: ${accent};">Open the invoice</a></p>
 </div>`,
     });
   }
+}
+
+/**
+ * Settings "Send test email" button: sends a SAMPLE INVOICE through the real
+ * template pipeline — current locale, accent color, currency, and the actual
+ * PDF (logo and fonts included) attached — addressed to the business email.
+ * The sample invoice is built in memory and never touches the database, and
+ * the number is unmistakably fake. Throws with deliver()'s descriptive
+ * errors so the settings page can show exactly what's wrong.
+ */
+export async function sendTestEmail(env: Bindings, db: D1Database): Promise<string> {
+  const settings = await getSettings(db);
+  if (!settings.business_email) {
+    throw new Error('Set a business email first — the test message is sent to it.');
+  }
+  const today = todayInTz(settings.timezone);
+  const rate = settings.default_rate_cents || 12500;
+  const items: InvoiceItem[] = [
+    {
+      id: 1,
+      invoice_id: 0,
+      position: 0,
+      description: 'Sample line item — design work',
+      quantity: 4,
+      unit_price_cents: rate,
+      amount_cents: 4 * rate,
+    },
+    { id: 2, invoice_id: 0, position: 1, description: 'Another sample item', quantity: 1, unit_price_cents: rate, amount_cents: rate },
+  ];
+  const totals = computeTotals(items, settings.tax_rate_bps);
+  const invoice: InvoiceWithClient = {
+    id: 0,
+    number: `${settings.invoice_prefix || 'INV-'}SAMPLE`,
+    client_id: 0,
+    status: 'sent',
+    currency: settings.currency,
+    issue_date: today,
+    due_date: settings.payment_terms_days ? addDaysISO(today, settings.payment_terms_days) : null,
+    subject: 'Test email — sample invoice',
+    notes: 'This is a sample invoice sent from Settings to preview your email and PDF. The pay link is not real.',
+    tax_rate_bps: settings.tax_rate_bps,
+    ...totals,
+    public_token: 'sample',
+    paypal_order_id: null,
+    sent_at: null,
+    paid_at: null,
+    created_at: '',
+    updated_at: '',
+    client_name: 'Sample Client',
+    client_email: settings.business_email,
+    client_locale: null,
+  };
+  const pdf = await generateInvoicePdf(
+    invoice,
+    items,
+    settings,
+    `${env.APP_BASE_URL}/pay/sample`,
+    env.ASSETS,
+    await getLogo(db)
+  );
+  await sendInvoiceEmail(env, invoice, settings, pdf);
+  return settings.business_email;
 }
 
 /**

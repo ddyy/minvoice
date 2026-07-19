@@ -242,9 +242,12 @@ Adding a language is one file: copy `src/lib/strings/en.ts`, translate the value
 it in `src/lib/strings/index.ts` — the compiler enforces completeness. The same file is the
 supported way to adjust wording you disagree with (say, `MwSt.` instead of `USt.`).
 
-PDFs embed Noto Sans/Serif (SIL OFL, see `public/fonts/pdf/OFL.txt`), which covers Latin —
-including Polish, Czech, Turkish, Vietnamese — plus Greek and Cyrillic, with per-document glyph
-subsetting so files stay small. Right-to-left scripts (Arabic, Hebrew) and Indic scripts are out
+PDFs embed Noto Sans/Serif (SIL OFL, see `public/fonts/pdf/OFL.txt`) only when the document
+actually needs them — the built-in locales (including umlauts, accents, and €) render with the
+PDF standard fonts at ~3.5ms CPU, comfortably inside the Workers Free plan's 10ms limit. Text
+in extended Latin (Polish, Czech, Turkish, Vietnamese), Greek, or Cyrillic triggers Noto
+embedding with per-document glyph subsetting (~130ms CPU), which needs the Workers Paid plan's
+CPU allowance. Right-to-left scripts (Arabic, Hebrew) and Indic scripts are out
 of scope: correct rendering needs a text-shaping engine the PDF layer doesn't have. CJK would
 need you to ship your own font files in a fork.
 

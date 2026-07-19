@@ -3,6 +3,7 @@ import fontkit from '@pdf-lib/fontkit';
 import type { InvoiceItem, InvoiceWithClient, Logo, Settings } from '../db/queries';
 import { formatTaxRate } from '../lib/money';
 import { formatCentsTag, formatDateTag, getStrings, resolveLocale } from '../lib/strings';
+import { hexToRgb01 } from '../lib/color';
 
 // US Letter, "Ledger" palette — mirrors public/styles.css
 const PAGE = { width: 612, height: 792 };
@@ -92,11 +93,43 @@ export async function generateInvoicePdf(
 ): Promise<Uint8Array> {
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
-  const money = (cents: number) => formatCentsTag(cents, invoice.currency, tag);
-  const date = (iso: string) => formatDateTag(iso, tag);
+  // Intl emits U+00A0/U+202F group separators (e.g. French '1\u202f234,56 €');
+  // normalize to plain spaces so formatted amounts stay WinAnsi-encodable.
+  const deSpace = (s: string) => s.replace(/[\u00a0\u202f]/g, ' ');
+  const money = (cents: number) => deSpace(formatCentsTag(cents, invoice.currency, tag));
+  const date = (iso: string) => deSpace(formatDateTag(iso, tag));
+  const a = hexToRgb01(settings.accent_color);
+  const ACCENT = rgb(a.r, a.g, a.b);
+
+  // Free-plan CPU: embedding + subsetting the Noto fonts costs ~130ms CPU vs
+  // ~3.5ms for the WinAnsi built-ins — far beyond the Workers Free 10ms cap.
+  // Every built-in locale (en/es/de/fr incl. umlauts, accents, €) fits
+  // WinAnsi, so embed the Unicode fonts ONLY when the document's actual text
+  // needs them (Cyrillic, Greek, extended Latin like Polish).
+  // Collect the EXACT strings that will be drawn — including locale-aware
+  // uppercasing (Turkish 'İ' is not WinAnsi) and every formatted date the
+  // document can contain (a Polish paid date renders 'paź').
+  const upper = (v: string) => v.toLocaleUpperCase(tag);
+  const documentText = [
+    t.invoice, upper(t.invoice),
+    ...[t.billedTo, t.subject, t.description, t.qty, t.unitPrice, t.amount, t.notes].map(upper),
+    t.issued, t.due, t.subtotal, t.tax, t.total, t.payOnline,
+    t.statusPaid, t.statusVoid,
+    t.footerThanks(settings.business_name || null),
+    settings.business_name, settings.business_address, settings.business_email ?? '',
+    invoice.number, invoice.client_name, invoice.client_email ?? '', invoice.subject ?? '', invoice.notes ?? '',
+    date(invoice.issue_date),
+    invoice.due_date ? date(invoice.due_date) : '',
+    invoice.paid_at ? date(invoice.paid_at.slice(0, 10)) : '',
+    money(invoice.total_cents),
+    ...items.map((it) => it.description),
+  ].join('');
+  const needsUnicodeFonts = ![...documentText].every(
+    (ch) => ch.charCodeAt(0) <= 0xff || CP1252_EXTRAS.has(ch)
+  );
 
   const doc = await PDFDocument.create();
-  const fonts = await embedFonts(doc, assets);
+  const fonts = await embedFonts(doc, needsUnicodeFonts ? assets : undefined);
   const ctx: Ctx = {
     doc,
     page: doc.addPage([PAGE.width, PAGE.height]),
@@ -133,7 +166,7 @@ export async function generateInvoicePdf(
     ctx.page.drawLine({ start: { x: x1, y: ctx.y }, end: { x: x2, y: ctx.y }, thickness: 0.7, color });
 
   // ---- Brand tape: the green bar from the pay page ----
-  ctx.page.drawRectangle({ x: 0, y: PAGE.height - 6, width: PAGE.width, height: 6, color: GREEN });
+  ctx.page.drawRectangle({ x: 0, y: PAGE.height - 6, width: PAGE.width, height: 6, color: ACCENT });
 
   // ---- Header: identity left, document meta right ----
   ctx.y = PAGE.height - 64;
@@ -268,7 +301,7 @@ export async function generateInvoicePdf(
       invoice.status === 'paid'
         ? `${t.statusPaid}${invoice.paid_at ? `  ${date(invoice.paid_at.slice(0, 10))}` : ''}`
         : t.statusVoid;
-    const color = invoice.status === 'paid' ? GREEN : RUST;
+    const color = invoice.status === 'paid' ? ACCENT : RUST;
     ctx.y -= 26;
     const w = ctx.bold.widthOfTextAtSize(sanitize(stamp, ctx.bold), 10) + 20;
     ctx.page.drawRectangle({

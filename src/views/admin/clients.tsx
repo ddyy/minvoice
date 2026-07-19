@@ -1,5 +1,5 @@
 import { Layout } from '../layout';
-import { SUPPORTED_LOCALES } from '../../lib/strings';
+import { LOCALE_OPTIONS } from '../../lib/strings';
 import { Icon } from '../icons';
 import type { Client } from '../../db/queries';
 
@@ -106,13 +106,22 @@ export function ClientNewPage({ currentPath }: { currentPath: string }) {
           </div>
           <div class="form-group">
             <label for="locale">Language &amp; region</label>
-            <input type="text" id="locale" name="locale" list="locale-list" autocomplete="off" placeholder="Inherit from settings" />
-            <datalist id="locale-list">
-              {SUPPORTED_LOCALES.map((l) => (
+            <select id="locale" name="locale">
+              <option value="">Inherit from settings</option>
+              {LOCALE_OPTIONS.map((l) => (
                 <option value={l.tag}>{l.label}</option>
               ))}
-            </datalist>
-            <span class="muted">Language for this client's emails, pay page, and PDF (e.g. de, es-MX).</span>
+              <option value="__custom__">Custom tag…</option>
+            </select>
+            <input
+              type="text"
+              id="locale_custom"
+              name="locale_custom"
+              hidden
+              autocomplete="off"
+              placeholder="BCP-47 tag, e.g. en-NZ, es-CL, pl"
+            />
+            <span class="muted">Language for this client's emails, pay page, and PDF.</span>
           </div>
           <div class="actions">
             <button type="submit" class="btn btn-primary">
@@ -124,6 +133,20 @@ export function ClientNewPage({ currentPath }: { currentPath: string }) {
           </div>
         </form>
       </div>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+(function () {
+  var sel = document.getElementById('locale'), inp = document.getElementById('locale_custom');
+  if (!sel || !inp) return;
+  sel.addEventListener('change', function () {
+    inp.hidden = sel.value !== '__custom__';
+    if (!inp.hidden) inp.focus();
+  });
+})();
+`,
+        }}
+      ></script>
     </Layout>
   );
 }
@@ -176,21 +199,31 @@ export function ClientEditPage({ currentPath, client }: { currentPath: string; c
           </div>
           <div class="form-group">
             <label for="locale">Language &amp; region</label>
+            <select id="locale" name="locale">
+              <option value="" selected={!client.locale}>
+                Inherit from settings
+              </option>
+              {LOCALE_OPTIONS.map((l) => (
+                <option value={l.tag} selected={l.tag === client.locale}>
+                  {l.label}
+                </option>
+              ))}
+              {client.locale && !LOCALE_OPTIONS.some((l) => l.tag === client.locale) ? (
+                <option value={client.locale} selected>
+                  {client.locale}
+                </option>
+              ) : null}
+              <option value="__custom__">Custom tag…</option>
+            </select>
             <input
               type="text"
-              id="locale"
-              name="locale"
-              value={client.locale ?? ''}
-              list="locale-list-edit"
+              id="locale_custom"
+              name="locale_custom"
+              hidden
               autocomplete="off"
-              placeholder="Inherit from settings"
+              placeholder="BCP-47 tag, e.g. en-NZ, es-CL, pl"
             />
-            <datalist id="locale-list-edit">
-              {SUPPORTED_LOCALES.map((l) => (
-                <option value={l.tag}>{l.label}</option>
-              ))}
-            </datalist>
-            <span class="muted">Language for this client's emails, pay page, and PDF (e.g. de, es-MX).</span>
+            <span class="muted">Language for this client's emails, pay page, and PDF.</span>
           </div>
           <div class="form-group">
             <label>
@@ -214,6 +247,20 @@ export function ClientEditPage({ currentPath, client }: { currentPath: string; c
           </div>
         </form>
       </div>
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+(function () {
+  var sel = document.getElementById('locale'), inp = document.getElementById('locale_custom');
+  if (!sel || !inp) return;
+  sel.addEventListener('change', function () {
+    inp.hidden = sel.value !== '__custom__';
+    if (!inp.hidden) inp.focus();
+  });
+})();
+`,
+        }}
+      ></script>
     </Layout>
   );
 }

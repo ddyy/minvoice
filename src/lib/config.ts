@@ -20,67 +20,58 @@ export function secretConfigured(v: string | undefined): boolean {
   return t !== '' && !PLACEHOLDER_VALUES.has(t);
 }
 
+export type ConfigWarning = { text: string; category: 'payments' | 'email' | 'auth' };
+
 /**
- * Human-readable warnings for missing secrets — shown on the admin dashboard
- * so misconfiguration surfaces before a client hits it.
+ * Human-readable warnings for missing configuration. Client-affecting
+ * categories (payments, email) surface on the dashboard so misconfiguration
+ * is seen before a client hits it; ALL categories (including the softer
+ * auth advice) show in Settings -> Alerts.
  */
 export function configWarnings(
   env: Bindings,
   settings: Settings,
   opts: { localDev?: boolean } = {}
-): string[] {
-  const warnings: string[] = [];
+): ConfigWarning[] {
+  const warnings: ConfigWarning[] = [];
   const e = effectiveProviderEnv(env, settings);
+  const push = (category: ConfigWarning['category'], text: string) => warnings.push({ category, text });
 
   if (settings.stripe_enabled) {
     if (!e.STRIPE_SECRET_KEY) {
-      warnings.push(
-        'Card payments are enabled but no STRIPE_SECRET_KEY is configured (Settings → Payments, or wrangler secret) — the card button is hidden.'
-      );
+      push('payments', 'Card payments are enabled but no STRIPE_SECRET_KEY is configured (Settings → Payments, or wrangler secret) — the card button is hidden.');
     } else if (!e.STRIPE_WEBHOOK_SECRET) {
-      warnings.push('STRIPE_WEBHOOK_SECRET is not configured — Stripe payments will never mark invoices paid.');
+      push('payments', 'STRIPE_WEBHOOK_SECRET is not configured — Stripe payments will never mark invoices paid.');
     }
   }
   if (settings.paypal_enabled) {
     if (!e.PAYPAL_CLIENT_ID || !e.PAYPAL_CLIENT_SECRET) {
-      warnings.push(
-        'PayPal is enabled but its credentials are not configured (Settings → Payments, or wrangler secret) — the PayPal button is hidden.'
-      );
+      push('payments', 'PayPal is enabled but its credentials are not configured (Settings → Payments, or wrangler secret) — the PayPal button is hidden.');
     } else if (!e.PAYPAL_WEBHOOK_ID && !opts.localDev) {
       // Suppressed in local dev: PayPal can't deliver webhooks to localhost
       // anyway — capture-on-return is the local path.
-      warnings.push(
-        'PAYPAL_WEBHOOK_ID is not configured — PayPal webhooks cannot be verified (capture-on-return still records payments).'
-      );
+      push('payments', 'PAYPAL_WEBHOOK_ID is not configured — PayPal webhooks cannot be verified (capture-on-return still records payments).');
     }
   }
   if (!settings.stripe_enabled && !settings.paypal_enabled) {
-    warnings.push(
-      'No payment methods are enabled (Settings → Payments) — clients can view invoices but not pay online.'
-    );
+    push('payments', 'No payment methods are enabled (Settings → Payments) — clients can view invoices but not pay online.');
   }
   if (settings.email_provider === 'none') {
-    warnings.push(
-      'Email sending is off (Settings → Email) — no invoice emails, receipts, or error alerts will be sent.'
-    );
+    push('email', 'Email sending is off (Settings → Email) — no invoice emails, receipts, or error alerts will be sent.');
   }
   if (settings.email_provider !== 'none') {
     if (settings.email_provider === 'resend' && !e.RESEND_API_KEY) {
-      warnings.push('Email provider is Resend but no Resend API key is configured — all emails will fail.');
+      push('email', 'Email provider is Resend but no Resend API key is configured — all emails will fail.');
     }
     if (settings.email_provider === 'cloudflare' && !env.EMAIL) {
-      warnings.push(
-        'Email provider is Cloudflare but the send_email binding is not configured — switch to Resend in Settings or add the binding.'
-      );
+      push('email', 'Email provider is Cloudflare but the send_email binding is not configured — switch to Resend in Settings or add the binding.');
     }
     if (!settings.email_from.trim()) {
-      warnings.push('No email From address set (Settings) — invoice and receipt emails will fail.');
+      push('email', 'No email From address set (Settings) — invoice and receipt emails will fail.');
     }
   }
   if (authMode(env) === 'password') {
-    warnings.push(
-      'Admin login is password-based — configure Cloudflare Access for stronger auth (it takes over automatically).'
-    );
+    push('auth', 'Admin login is password-based — configure Cloudflare Access for stronger auth (it takes over automatically).');
   }
   return warnings;
 }

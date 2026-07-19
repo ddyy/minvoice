@@ -1,7 +1,8 @@
 import { Layout } from '../layout';
-import { SUPPORTED_LOCALES } from '../../lib/strings';
+import { LOCALE_OPTIONS } from '../../lib/strings';
 import { formatTaxRate, isSupportedCurrency } from '../../lib/money';
 import type { Settings } from '../../db/queries';
+import type { ConfigWarning } from '../../lib/config';
 import type { KeySource } from '../../lib/providers';
 
 export type ProviderFieldMeta = {
@@ -48,6 +49,11 @@ export function SettingsPage({
   numKept,
   providerMeta,
   hasLogo,
+  emailTestOk,
+  emailTestErr,
+  resendKept,
+  accentKept,
+  alerts = [],
 }: {
   currentPath: string;
   settings: Settings;
@@ -57,6 +63,11 @@ export function SettingsPage({
   numKept?: boolean;
   providerMeta: ProviderFieldMeta;
   hasLogo?: boolean;
+  emailTestOk?: string | null;
+  emailTestErr?: string | null;
+  resendKept?: boolean;
+  accentKept?: boolean;
+  alerts?: ConfigWarning[];
 }) {
   const { sources, hints } = providerMeta;
   const taxRatePercent = (settings.tax_rate_bps / 100).toFixed(2);
@@ -85,13 +96,41 @@ export function SettingsPage({
           Next invoice number must be a whole number of 1 or more — the previous value was kept.
         </div>
       ) : null}
+      {emailTestOk ? (
+        <div class="banner banner-success">Test email sent to {emailTestOk} — check the inbox (and spam).</div>
+      ) : null}
+      {emailTestErr ? <div class="banner banner-error">Test email failed: {emailTestErr}</div> : null}
+      {accentKept ? (
+        <div class="banner banner-warning">
+          That accent color is too light to stay readable on invoices and emails — the previous color
+          was kept. Pick something darker.
+        </div>
+      ) : null}
+      {resendKept ? (
+        <div class="banner banner-warning">
+          Resend needs an API key before it can be the provider — add the key (Settings → Email) and save
+          again. The previous provider was kept.
+        </div>
+      ) : null}
 
       <nav class="filter-tabs settings-nav">
+        {alerts.length ? <a href="#alerts">Alerts</a> : null}
         <a href="#business">Business</a>
         <a href="#invoicing">Invoicing</a>
         <a href="#email">Email</a>
         <a href="#payments">Payments</a>
       </nav>
+
+      {alerts.length ? (
+        <div class="card" id="alerts">
+          <h2>Alerts</h2>
+          <ul class="warning-list settings-alerts">
+            {alerts.map((a) => (
+              <li>{a.text}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <form method="post" action="/admin/settings" enctype="multipart/form-data">
         <div class="card" id="business">
@@ -120,19 +159,20 @@ export function SettingsPage({
           <div class="form-group">
             <label for="logo_file">Logo</label>
             {hasLogo ? (
-              <p class="muted">
-                <img src="/logo" alt="Current logo" style="max-height: 36px; vertical-align: middle;" /> Current
-                uploaded logo.{' '}
-                <label style="font-weight: normal;">
-                  <input type="checkbox" name="remove_logo" value="1" /> Remove it
+              <div class="logo-preview">
+                <img src="/logo" alt="Current logo" />
+                <span class="muted">Current logo</span>
+                <label class="logo-remove">
+                  <input type="checkbox" name="remove_logo" value="1" /> Remove on save
                 </label>
-              </p>
+              </div>
             ) : null}
             <input type="file" id="logo_file" name="logo_file" accept="image/png,image/jpeg" />
             <span class="muted">
-              PNG or JPEG, up to 500 KB — stored in your database and shown on the PDF. Uploading replaces
-              the previous one.
+              PNG or JPEG — stored in your database and shown on the PDF. Uploading replaces the previous
+              one. Large images are resized in your browser to fit the 500 KB limit.
             </span>
+            <span class="muted" id="logo-resize-note" hidden></span>
           </div>
 
           <div class="form-group">
@@ -209,25 +249,46 @@ export function SettingsPage({
 
           <div class="form-group">
             <label for="locale">Customer language &amp; region</label>
+            <select id="locale" name="locale">
+              {LOCALE_OPTIONS.map((l) => (
+                <option value={l.tag} selected={l.tag === settings.locale}>
+                  {l.label}
+                </option>
+              ))}
+              {LOCALE_OPTIONS.some((l) => l.tag === settings.locale) ? null : (
+                <option value={settings.locale} selected>
+                  {settings.locale}
+                </option>
+              )}
+              <option value="__custom__">Custom tag…</option>
+            </select>
             <input
               type="text"
-              id="locale"
-              name="locale"
-              value={settings.locale}
-              list="locale-list"
+              id="locale_custom"
+              name="locale_custom"
+              hidden
               autocomplete="off"
-              placeholder="en, de, es-MX, fr-CA…"
+              placeholder="BCP-47 tag, e.g. en-NZ, es-CL, pl"
             />
-            <datalist id="locale-list">
-              {SUPPORTED_LOCALES.map((l) => (
-                <option value={l.tag}>{l.label}</option>
-              ))}
-            </datalist>
             <span class="muted">
-              Language of everything clients see: invoice emails, the pay page, and the PDF. Built-in:
-              English, Español, Deutsch, Français. A regional tag like de-AT keeps German text with
-              Austrian date/number formatting. Per-client overrides live on each client. The admin stays
-              English.
+              Language of everything clients see: invoice emails, the pay page, and the PDF. The region
+              variant only changes date and number formatting. Per-client overrides live on each client.
+              The admin stays English.
+            </span>
+          </div>
+
+          <div class="form-group">
+            <label for="accent_color">Brand accent color</label>
+            <input
+              type="color"
+              id="accent_color"
+              name="accent_color"
+              value={settings.accent_color}
+              style="width: 3.5rem; height: 2.2rem; padding: 2px; vertical-align: middle;"
+            />
+            <span class="muted">
+              Used for invoice email buttons and links, and the PDF's top band and PAID stamp. Very
+              light colors are rejected (they disappear against the page). Defaults to the Ledger green.
             </span>
           </div>
 
@@ -387,6 +448,19 @@ export function SettingsPage({
             </button>
           </div>
         </form>
+
+        <form method="post" action="/admin/settings/test-email" class="mt-2">
+          <div class="actions">
+            <button type="submit" class="btn btn-secondary">
+              Send test email
+            </button>
+            <span class="muted">
+              Sends a sample invoice email (with PDF attached) to your business email so you can see
+              exactly what clients get — your language, accent color, and logo included. Uses the SAVED
+              settings above, so save first if you changed anything.
+            </span>
+          </div>
+        </form>
       </div>
 
       <div class="card" id="payments">
@@ -492,6 +566,63 @@ export function SettingsPage({
     emailFields.hidden = provider.value === 'none';
     resendWrap.hidden = provider.value !== 'resend';
     cfNote.hidden = provider.value !== 'cloudflare';
+  });
+
+  // Logo: downscale oversized images in the browser so they fit the server's
+  // 500 KB cap (Workers have no image codecs; canvas does this for free).
+  // PNGs stay PNG to keep transparency; JPEGs step down in quality.
+  var localeSel = document.getElementById('locale');
+  var localeCustom = document.getElementById('locale_custom');
+  if (localeSel && localeCustom) {
+    localeSel.addEventListener('change', function () {
+      localeCustom.hidden = localeSel.value !== '__custom__';
+      if (!localeCustom.hidden) localeCustom.focus();
+    });
+  }
+
+  var logoInput = document.getElementById('logo_file');
+  var logoNote = document.getElementById('logo-resize-note');
+  var CAP = 500 * 1024;
+  logoInput.addEventListener('change', function () {
+    var file = logoInput.files && logoInput.files[0];
+    if (!file || file.size <= CAP) { if (logoNote) logoNote.hidden = true; return; }
+    var isPng = file.type === 'image/png';
+    var img = new Image();
+    var url = URL.createObjectURL(file);
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var widths = [1000, 700, 500, 350, 250];
+      var qualities = isPng ? [1] : [0.85, 0.7, 0.55];
+      var attempts = [];
+      widths.forEach(function (w) { qualities.forEach(function (q) { attempts.push([w, q]); }); });
+      var i = 0;
+      function tryNext() {
+        if (i >= attempts.length) { if (logoNote) { logoNote.hidden = false; logoNote.textContent = 'Could not shrink this image under 500 KB — please use a smaller file.'; } return; }
+        var w = Math.min(attempts[i][0], img.width), q = attempts[i][1];
+        i += 1;
+        var scale = w / img.width;
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(function (blob) {
+          if (!blob) { tryNext(); return; }
+          if (blob.size > CAP) { tryNext(); return; }
+          var resized = new File([blob], file.name, { type: file.type });
+          var dt = new DataTransfer();
+          dt.items.add(resized);
+          logoInput.files = dt.files;
+          if (logoNote) {
+            logoNote.hidden = false;
+            logoNote.textContent = 'Large image resized to ' + canvas.width + '\u00d7' + canvas.height +
+              ' (' + Math.round(blob.size / 1024) + ' KB) before upload.';
+          }
+        }, file.type, q);
+      }
+      tryNext();
+    };
+    img.onerror = function () { URL.revokeObjectURL(url); };
+    img.src = url;
   });
 })();
 `,

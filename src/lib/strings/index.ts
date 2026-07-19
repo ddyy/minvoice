@@ -91,6 +91,29 @@ export const SUPPORTED_LOCALES = [
   { tag: 'fr', label: 'Français' },
 ] as const;
 
+/**
+ * The admin dropdowns: each built-in language plus common regional variants
+ * (same strings, region-specific date/number formatting). Purely a UI list —
+ * any valid BCP-47 tag still works if set another way, and forks adding a
+ * language extend this alongside LOCALES.
+ */
+export const LOCALE_OPTIONS: { tag: string; label: string }[] = [
+  { tag: 'en', label: 'English (US formats)' },
+  { tag: 'en-GB', label: 'English (UK formats)' },
+  { tag: 'en-CA', label: 'English (Canada formats)' },
+  { tag: 'en-AU', label: 'English (Australia formats)' },
+  { tag: 'es', label: 'Español (España)' },
+  { tag: 'es-MX', label: 'Español (México)' },
+  { tag: 'es-AR', label: 'Español (Argentina)' },
+  { tag: 'de', label: 'Deutsch (Deutschland)' },
+  { tag: 'de-AT', label: 'Deutsch (Österreich)' },
+  { tag: 'de-CH', label: 'Deutsch (Schweiz)' },
+  { tag: 'fr', label: 'Français (France)' },
+  { tag: 'fr-CA', label: 'Français (Canada)' },
+  { tag: 'fr-CH', label: 'Français (Suisse)' },
+  { tag: 'fr-BE', label: 'Français (Belgique)' },
+];
+
 /** Strings for a BCP-47 tag ('de', 'de-AT', 'fr-CA'…); English fallback. */
 export function getStrings(tag: string): Strings {
   return LOCALES[(tag || 'en').toLowerCase().split('-')[0]] ?? en;
