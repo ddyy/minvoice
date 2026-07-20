@@ -53,7 +53,8 @@ Everything beyond the Worker itself is optional:
   logged to the invoice history and delivered through a durable outbox that retries failures
 - **Admin** — dashboard with status tabs and client filter, payments list, monthly reports
   (filterable by client), CSV export,
-  first-launch setup wizard, configuration warnings for missing secrets, and logo upload
+  first-launch setup wizard, configuration warnings for missing secrets, encrypted-at-rest
+  storage for API keys entered in-app, and logo upload
   (PNG/JPEG stored in your database — no external image host needed; a logo URL still works)
 - **No fees** — fits Cloudflare's free tier (Resend's free tier covers email there), so there's
   no monthly cost to run. No subscription and no added payment fees on any plan: you pay only
@@ -190,10 +191,17 @@ set, and the dashboard warns about any provider misconfiguration.
 ### 5. Secrets and deploy
 
 Only `ADMIN_PASSWORD` is needed up front (the one-click flow prompts for exactly that). Payment
-and Resend keys can be added **either** in-app (Settings → Payments & keys — stored in D1, zero
-CLI) **or** as Wrangler secrets, which are encrypted at rest, excluded from database exports, and
-**always take precedence** — the hardened choice. Each payment method also has an on/off toggle
-in Settings. Pay buttons stay hidden and the dashboard warns until a method is configured:
+and Resend keys can be added **either** in-app (Settings → Payments & keys — zero CLI) **or** as
+Wrangler secrets, which are excluded from database exports and **always take precedence** — the
+hardened choice. Each payment method also has an on/off toggle in Settings. Pay buttons stay
+hidden and the dashboard warns until a method is configured.
+
+Keys entered in-app are envelope-encrypted (AES-256-GCM) before they're stored in D1, using a
+`SETTINGS_MASTER_KEY` secret that `npm run deploy` generates automatically on first deploy. A
+database export alone can't reveal them — reading a key requires the Worker secret too. Existing
+deployments migrate on their own: any plaintext keys are re-encrypted the next time the Settings
+page loads after the master key exists (Settings shows an alert until then). Don't rotate or
+delete `SETTINGS_MASTER_KEY` — stored keys become undecryptable and must be re-entered.
 
 ```sh
 npx wrangler secret put ADMIN_PASSWORD          # unless you configured Access in step 3

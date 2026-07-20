@@ -20,7 +20,7 @@ webhooks.post('/stripe', async (c) => {
   let event: Stripe.Event;
   try {
     const settings = await getSettings(c.env.DB);
-    event = await verifyStripeEvent(effectiveProviderEnv(c.env, settings), rawBody, signature);
+    event = await verifyStripeEvent(await effectiveProviderEnv(c.env, settings), rawBody, signature);
   } catch {
     return c.text('invalid signature', 400);
   }
@@ -62,7 +62,7 @@ webhooks.post('/paypal', async (c) => {
   let verified = false;
   try {
     const settings = await getSettings(c.env.DB);
-    verified = await verifyPaypalWebhook(effectiveProviderEnv(c.env, settings), c.req.raw.headers, rawBody);
+    verified = await verifyPaypalWebhook(await effectiveProviderEnv(c.env, settings), c.req.raw.headers, rawBody);
   } catch {
     verified = false;
   }

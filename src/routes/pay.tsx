@@ -80,7 +80,7 @@ pay.get('/:token', async (c) => {
       settings={settings}
       justPaid={c.req.query('paid') === '1'}
       canceled={c.req.query('canceled') === '1'}
-      providers={providerAvailability(c.env, settings)}
+      providers={await providerAvailability(c.env, settings)}
     />
   );
 });
@@ -120,12 +120,12 @@ pay.post('/:token/stripe', async (c) => {
   const invoice = await getInvoiceByToken(c.env.DB, c.req.param('token'));
   if (!invoice) return c.notFound();
   const settings = await getSettings(c.env.DB);
-  if (!providerAvailability(c.env, settings).stripe) return c.redirect(`/pay/${invoice.public_token}`, 303);
+  if (!(await providerAvailability(c.env, settings)).stripe) return c.redirect(`/pay/${invoice.public_token}`, 303);
   if (invoice.status === 'paid' || invoice.status === 'void' || invoice.total_cents <= 0) {
     return c.redirect(`/pay/${invoice.public_token}`, 303);
   }
   const url = await createCheckoutSession(
-    effectiveProviderEnv(c.env, settings),
+    await effectiveProviderEnv(c.env, settings),
     invoice,
     settings.business_name || undefined
   );
@@ -136,13 +136,13 @@ pay.post('/:token/paypal', async (c) => {
   const invoice = await getInvoiceByToken(c.env.DB, c.req.param('token'));
   if (!invoice) return c.notFound();
   const settings = await getSettings(c.env.DB);
-  if (!providerAvailability(c.env, settings).paypal) {
+  if (!(await providerAvailability(c.env, settings)).paypal) {
     return c.redirect(`/pay/${invoice.public_token}`, 303);
   }
   if (invoice.status === 'paid' || invoice.status === 'void' || invoice.total_cents <= 0) {
     return c.redirect(`/pay/${invoice.public_token}`, 303);
   }
-  const { orderId, approveUrl } = await createOrder(effectiveProviderEnv(c.env, settings), invoice);
+  const { orderId, approveUrl } = await createOrder(await effectiveProviderEnv(c.env, settings), invoice);
   await setPaypalOrderId(c.env.DB, invoice.id, orderId);
   return c.redirect(approveUrl, 303);
 });
@@ -160,7 +160,7 @@ pay.get('/:token/paypal/return', async (c) => {
 
   try {
     const settings = await getSettings(c.env.DB);
-    const capture = await captureOrder(effectiveProviderEnv(c.env, settings), orderId);
+    const capture = await captureOrder(await effectiveProviderEnv(c.env, settings), orderId);
     if (capture.status === 'COMPLETED') {
       const result = await markInvoicePaidFromWebhook(c.env.DB, {
         provider: 'paypal',

@@ -239,6 +239,22 @@ export async function setResendApiKey(db: D1Database, key: string): Promise<void
   await db.prepare('UPDATE settings SET resend_api_key = ? WHERE id = 1').bind(key).run();
 }
 
+/** Settings columns holding true secrets (masked in the UI, envelope-encrypted
+ *  when SETTINGS_MASTER_KEY exists). paypal_client_id / paypal_webhook_id are
+ *  identifiers shown in full and stay plaintext. */
+export const SECRET_SETTINGS_COLUMNS = [
+  'stripe_secret_key',
+  'stripe_webhook_secret',
+  'paypal_client_secret',
+  'resend_api_key',
+] as const;
+export type SecretSettingsColumn = (typeof SECRET_SETTINGS_COLUMNS)[number];
+
+export async function setSecretSetting(db: D1Database, column: SecretSettingsColumn, value: string): Promise<void> {
+  // column is compile-time constrained to the whitelist above
+  await db.prepare(`UPDATE settings SET ${column} = ? WHERE id = 1`).bind(value).run();
+}
+
 export async function setNextInvoiceNumber(db: D1Database, n: number): Promise<void> {
   await db.prepare('UPDATE settings SET next_invoice_number = ? WHERE id = 1').bind(n).run();
 }

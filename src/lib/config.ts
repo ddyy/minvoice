@@ -1,7 +1,7 @@
 import type { Bindings } from '../env';
 import type { Settings } from '../db/queries';
 import { authMode } from './admin-auth';
-import { effectiveProviderEnv } from './providers';
+import { effectiveProviderEnv, storedSecretsHealth } from './providers';
 
 // Example/template values that have historically leaked into real secrets
 // (one-click deploys prompt from .dev.vars.example) — never treat as configured.
@@ -28,14 +28,21 @@ export type ConfigWarning = { text: string; category: 'payments' | 'email' | 'au
  * is seen before a client hits it; ALL categories (including the softer
  * auth advice) show in Settings -> Alerts.
  */
-export function configWarnings(
+export async function configWarnings(
   env: Bindings,
   settings: Settings,
   opts: { localDev?: boolean } = {}
-): ConfigWarning[] {
+): Promise<ConfigWarning[]> {
   const warnings: ConfigWarning[] = [];
-  const e = effectiveProviderEnv(env, settings);
+  const e = await effectiveProviderEnv(env, settings);
   const push = (category: ConfigWarning['category'], text: string) => warnings.push({ category, text });
+
+  const secrets = await storedSecretsHealth(env, settings);
+  if (secrets.undecryptable) {
+    push('payments', 'Stored API keys cannot be decrypted — SETTINGS_MASTER_KEY is missing or changed. Restore the original secret, or re-enter the keys in Settings.');
+  } else if (secrets.plaintextStored && !secretConfigured(env.SETTINGS_MASTER_KEY)) {
+    push('auth', 'API keys entered in Settings are stored unencrypted — set a SETTINGS_MASTER_KEY secret (`npm run deploy` generates one) to encrypt them at rest.');
+  }
 
   if (settings.stripe_enabled) {
     if (!e.STRIPE_SECRET_KEY) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { effectiveProviderEnv, keySource, providerAvailability } from './providers';
+import { box } from './secretbox';
 import type { Bindings } from '../env';
 import type { Settings } from '../db/queries';
 
@@ -20,68 +21,102 @@ const settings = (over: Partial<Settings> = {}): Settings =>
 const env = (over: Partial<Bindings> = {}): Bindings => ({ ...over }) as Bindings;
 
 describe('effectiveProviderEnv', () => {
-  it('env secret wins over a stored key', () => {
-    const e = effectiveProviderEnv(
+  it('env secret wins over a stored key', async () => {
+    const e = await effectiveProviderEnv(
       env({ STRIPE_SECRET_KEY: 'sk_live_env' }),
       settings({ stripe_secret_key: 'sk_live_stored' })
     );
     expect(e.STRIPE_SECRET_KEY).toBe('sk_live_env');
   });
 
-  it('falls back to the stored key when no env secret', () => {
-    const e = effectiveProviderEnv(env(), settings({ stripe_secret_key: 'sk_live_stored' }));
+  it('falls back to the stored key when no env secret', async () => {
+    const e = await effectiveProviderEnv(env(), settings({ stripe_secret_key: 'sk_live_stored' }));
     expect(e.STRIPE_SECRET_KEY).toBe('sk_live_stored');
   });
 
-  it('placeholders never count, from either source', () => {
-    const e = effectiveProviderEnv(
+  it('placeholders never count, from either source', async () => {
+    const e = await effectiveProviderEnv(
       env({ STRIPE_SECRET_KEY: 'sk_test_xxx' }),
       settings({ stripe_secret_key: '  ' })
+    );
+    expect(e.STRIPE_SECRET_KEY).toBeUndefined();
+  });
+
+  it('decrypts a boxed stored key with the master key', async () => {
+    const boxed = await box('master', 'sk_live_boxed');
+    const e = await effectiveProviderEnv(
+      env({ SETTINGS_MASTER_KEY: 'master' }),
+      settings({ stripe_secret_key: boxed })
+    );
+    expect(e.STRIPE_SECRET_KEY).toBe('sk_live_boxed');
+  });
+
+  it('a boxed key is unconfigured when the master key is absent or wrong', async () => {
+    const boxed = await box('master', 'sk_live_boxed');
+    const stored = settings({ stripe_secret_key: boxed });
+    expect((await effectiveProviderEnv(env(), stored)).STRIPE_SECRET_KEY).toBeUndefined();
+    expect(
+      (await effectiveProviderEnv(env({ SETTINGS_MASTER_KEY: 'rotated-wrong' }), stored)).STRIPE_SECRET_KEY
+    ).toBeUndefined();
+  });
+
+  it('a boxed placeholder still never counts', async () => {
+    const boxed = await box('master', 'sk_test_xxx');
+    const e = await effectiveProviderEnv(
+      env({ SETTINGS_MASTER_KEY: 'master' }),
+      settings({ stripe_secret_key: boxed })
     );
     expect(e.STRIPE_SECRET_KEY).toBeUndefined();
   });
 });
 
 describe('providerAvailability', () => {
-  it('requires the toggle AND credentials', () => {
+  it('requires the toggle AND credentials', async () => {
     const withKey = settings({ stripe_secret_key: 'sk_live_x' });
-    expect(providerAvailability(env(), withKey).stripe).toBe(true);
-    expect(providerAvailability(env(), settings({ ...withKey, stripe_enabled: 0 })).stripe).toBe(false);
-    expect(providerAvailability(env(), settings()).stripe).toBe(false);
+    expect((await providerAvailability(env(), withKey)).stripe).toBe(true);
+    expect((await providerAvailability(env(), settings({ ...withKey, stripe_enabled: 0 }))).stripe).toBe(false);
+    expect((await providerAvailability(env(), settings())).stripe).toBe(false);
   });
 
-  it('paypal needs both id and secret', () => {
-    expect(providerAvailability(env(), settings({ paypal_client_id: 'cid' })).paypal).toBe(false);
+  it('paypal needs both id and secret', async () => {
+    expect((await providerAvailability(env(), settings({ paypal_client_id: 'cid' }))).paypal).toBe(false);
     expect(
-      providerAvailability(env(), settings({ paypal_client_id: 'cid', paypal_client_secret: 'sec' })).paypal
+      (await providerAvailability(env(), settings({ paypal_client_id: 'cid', paypal_client_secret: 'sec' }))).paypal
     ).toBe(true);
   });
 
-  it('toggle can silence an env-configured provider', () => {
+  it('toggle can silence an env-configured provider', async () => {
     const e = env({ STRIPE_SECRET_KEY: 'sk_live_env' });
-    expect(providerAvailability(e, settings()).stripe).toBe(true);
-    expect(providerAvailability(e, settings({ stripe_enabled: 0 })).stripe).toBe(false);
+    expect((await providerAvailability(e, settings())).stripe).toBe(true);
+    expect((await providerAvailability(e, settings({ stripe_enabled: 0 }))).stripe).toBe(false);
+  });
+
+  it('an undecryptable boxed key makes the provider unavailable', async () => {
+    const boxed = await box('master', 'sk_live_x');
+    expect((await providerAvailability(env(), settings({ stripe_secret_key: boxed }))).stripe).toBe(false);
   });
 });
 
 describe('paypal environment', () => {
-  it('env var wins; otherwise the settings selector picks the base', () => {
+  it('env var wins; otherwise the settings selector picks the base', async () => {
     expect(
-      effectiveProviderEnv(env({ PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com' }), settings())
+      (await effectiveProviderEnv(env({ PAYPAL_API_BASE: 'https://api-m.sandbox.paypal.com' }), settings()))
         .PAYPAL_API_BASE
     ).toBe('https://api-m.sandbox.paypal.com');
-    expect(effectiveProviderEnv(env(), settings({ paypal_environment: 'sandbox' })).PAYPAL_API_BASE).toBe(
+    expect((await effectiveProviderEnv(env(), settings({ paypal_environment: 'sandbox' }))).PAYPAL_API_BASE).toBe(
       'https://api-m.sandbox.paypal.com'
     );
-    expect(effectiveProviderEnv(env(), settings()).PAYPAL_API_BASE).toBe('https://api-m.paypal.com');
+    expect((await effectiveProviderEnv(env(), settings())).PAYPAL_API_BASE).toBe('https://api-m.paypal.com');
   });
 });
 
 describe('keySource', () => {
-  it('labels provenance', () => {
+  it('labels provenance', async () => {
     expect(keySource('sk_live_env', 'stored')).toBe('secret');
     expect(keySource(undefined, 'stored')).toBe('settings');
     expect(keySource(undefined, '')).toBe('none');
     expect(keySource('sk_test_xxx', '')).toBe('none');
+    // boxed stored values still count as settings-provided
+    expect(keySource(undefined, await box('master', 'sk_live_x'))).toBe('settings');
   });
 });

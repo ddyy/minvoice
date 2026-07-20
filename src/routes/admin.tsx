@@ -4,7 +4,8 @@ import { formatCents, isSupportedCurrency, parseAmountToCents } from '../lib/mon
 import { addDaysISO, isValidTimezone, todayInTz } from '../lib/dates';
 import { configWarnings, secretConfigured } from '../lib/config';
 import { accentUsable, safeAccent } from '../lib/color';
-import { keySource } from '../lib/providers';
+import { encryptStoredSecrets, keySource } from '../lib/providers';
+import { sealIfKeyed, unbox } from '../lib/secretbox';
 import { isLocalRequest } from '../lib/admin-auth';
 import { parseSchedule } from '../lib/reminders';
 import {
@@ -232,7 +233,7 @@ admin.get('/', async (c) => {
       clientId={clientId}
       deleted={c.req.query('deleted')}
       today={todayInTz(settings.timezone)}
-      warnings={configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })
+      warnings={(await configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) }))
         .filter((w) => w.category !== 'auth')
         .map((w) => w.text)}
       currentPath="/admin"
@@ -760,6 +761,8 @@ admin.get('/reports', async (c) => {
 // ---------- Settings ----------
 
 admin.get('/settings', async (c) => {
+  // Lazy migration: re-encrypt any plaintext stored keys once a master key exists.
+  await encryptStoredSecrets(c.env.DB, c.env, await getSettings(c.env.DB));
   const settings = await getSettings(c.env.DB);
   const saved = c.req.query('saved') === '1';
   const tzKept = c.req.query('tz_kept') === '1';
@@ -769,7 +772,12 @@ admin.get('/settings', async (c) => {
   const emailTestErr = c.req.query('email_test_err') ?? null;
   const resendKept = c.req.query('resend_kept') === '1';
   const accentKeptQ = c.req.query('accent_kept') === '1';
-  const tail = (v: string) => (v ? v.slice(-4) : '');
+  // Masked-field hints show the last 4 chars of the real key, so boxed values
+  // are opened first; undecryptable ones fall back to '' (alert explains why).
+  const tail = async (v: string) => {
+    const opened = await unbox(c.env.SETTINGS_MASTER_KEY, v.trim());
+    return opened ? opened.slice(-4) : '';
+  };
   const providerMeta = {
     sources: {
       stripeKey: keySource(c.env.STRIPE_SECRET_KEY, settings.stripe_secret_key),
@@ -780,10 +788,10 @@ admin.get('/settings', async (c) => {
       resend: keySource(c.env.RESEND_API_KEY, settings.resend_api_key),
     },
     hints: {
-      stripeKey: tail(settings.stripe_secret_key),
-      stripeWebhook: tail(settings.stripe_webhook_secret),
-      paypalSecret: tail(settings.paypal_client_secret),
-      resend: tail(settings.resend_api_key),
+      stripeKey: await tail(settings.stripe_secret_key),
+      stripeWebhook: await tail(settings.stripe_webhook_secret),
+      paypalSecret: await tail(settings.paypal_client_secret),
+      resend: await tail(settings.resend_api_key),
     },
     paypalEnvManaged: !!(c.env.PAYPAL_API_BASE ?? '').trim(),
   };
@@ -801,7 +809,7 @@ admin.get('/settings', async (c) => {
       emailTestErr={emailTestErr}
       resendKept={resendKept}
       accentKept={accentKeptQ}
-      alerts={configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })}
+      alerts={await configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })}
     />
   );
 });
@@ -877,7 +885,7 @@ admin.post('/settings/email', async (c) => {
     // Normalized on save so the cron and the UI always agree on the cadence
     reminder_schedule: parseSchedule(body.reminder_schedule ?? '').join(', '),
   });
-  if (submittedKey) await setResendApiKey(c.env.DB, submittedKey);
+  if (submittedKey) await setResendApiKey(c.env.DB, await sealIfKeyed(c.env.SETTINGS_MASTER_KEY, submittedKey));
   return c.redirect(resendKept ? '/admin/settings?saved=1&resend_kept=1' : '/admin/settings?saved=1');
 });
 
@@ -894,21 +902,25 @@ admin.post('/settings/test-email', async (c) => {
 admin.post('/settings/providers', async (c) => {
   const body = (await c.req.parseBody()) as Record<string, string>;
   const cur = await getSettings(c.env.DB);
-  // Masked fields: blank means "keep the stored value". Plain fields (ids)
-  // display their value and submit it back directly, so empty clears them.
-  const keep = (input: string | undefined, current: string) => (input ?? '').trim() || current;
+  // Masked fields: blank means "keep the stored value" (already encrypted);
+  // new values are encrypted when SETTINGS_MASTER_KEY exists. Plain fields
+  // (ids) display their value and submit it back directly, so empty clears them.
+  const keep = async (input: string | undefined, current: string) => {
+    const t = (input ?? '').trim();
+    return t ? await sealIfKeyed(c.env.SETTINGS_MASTER_KEY, t) : current;
+  };
   const plain = (input: string | undefined, current: string) =>
     input === undefined ? current : input.trim();
   await updateProviderSettings(c.env.DB, {
     stripe_enabled: body.stripe_enabled ? 1 : 0,
     paypal_enabled: body.paypal_enabled ? 1 : 0,
-    stripe_secret_key: keep(body.stripe_secret_key, cur.stripe_secret_key),
-    stripe_webhook_secret: keep(body.stripe_webhook_secret, cur.stripe_webhook_secret),
+    stripe_secret_key: await keep(body.stripe_secret_key, cur.stripe_secret_key),
+    stripe_webhook_secret: await keep(body.stripe_webhook_secret, cur.stripe_webhook_secret),
     paypal_client_id: plain(body.paypal_client_id, cur.paypal_client_id),
-    paypal_client_secret: keep(body.paypal_client_secret, cur.paypal_client_secret),
+    paypal_client_secret: await keep(body.paypal_client_secret, cur.paypal_client_secret),
     paypal_webhook_id: plain(body.paypal_webhook_id, cur.paypal_webhook_id),
     paypal_environment: body.paypal_environment === 'sandbox' ? 'sandbox' : body.paypal_environment === 'live' ? 'live' : cur.paypal_environment,
-    resend_api_key: keep(body.resend_api_key, cur.resend_api_key),
+    resend_api_key: await keep(body.resend_api_key, cur.resend_api_key),
   });
   return c.redirect('/admin/settings?saved=1');
 });

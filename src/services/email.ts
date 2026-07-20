@@ -33,7 +33,7 @@ async function deliver(env: Bindings, settings: Settings, m: Mail): Promise<void
     throw new Error('No sending address configured — set "Email from address" in Settings.');
   }
   if (settings.email_provider === 'resend') {
-    const resendKey = effectiveProviderEnv(env, settings).RESEND_API_KEY;
+    const resendKey = (await effectiveProviderEnv(env, settings)).RESEND_API_KEY;
     if (!resendKey) {
       throw new Error('Email provider is set to Resend but no Resend API key is configured (Settings or secret)');
     }
