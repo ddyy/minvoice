@@ -54,6 +54,7 @@ export function SettingsPage({
   resendKept,
   accentKept,
   alerts = [],
+  theme = 'auto',
 }: {
   currentPath: string;
   settings: Settings;
@@ -68,6 +69,8 @@ export function SettingsPage({
   resendKept?: boolean;
   accentKept?: boolean;
   alerts?: ConfigWarning[];
+  /** From the per-browser theme cookie, not Settings (D1) — see /settings/appearance */
+  theme?: 'auto' | 'light' | 'dark';
 }) {
   const { sources, hints } = providerMeta;
   const taxRatePercent = (settings.tax_rate_bps / 100).toFixed(2);
@@ -119,6 +122,7 @@ export function SettingsPage({
         <a href="#invoicing">Invoicing</a>
         <a href="#email">Email</a>
         <a href="#payments">Payments</a>
+        <a href="#appearance">Appearance</a>
       </nav>
 
       {alerts.length ? (
@@ -541,6 +545,34 @@ export function SettingsPage({
           <div class="actions">
             <button type="submit" class="btn btn-primary">
               Save payment settings
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" id="appearance">
+        <h2>Appearance</h2>
+        <form method="post" action="/admin/settings/appearance">
+          <div class="form-group">
+            <label for="theme">Theme</label>
+            <select id="theme" name="theme">
+              <option value="auto" selected={theme === 'auto'}>
+                Auto — match this device
+              </option>
+              <option value="light" selected={theme === 'light'}>
+                Light
+              </option>
+              <option value="dark" selected={theme === 'dark'}>
+                Dark
+              </option>
+            </select>
+            <span class="muted">
+              Dashboard only, saved per browser. Invoices, the pay page, and PDFs always stay light.
+            </span>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">
+              Save appearance
             </button>
           </div>
         </form>

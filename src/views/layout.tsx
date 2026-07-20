@@ -28,6 +28,16 @@ export function Layout({ title, children, variant = 'admin', currentPath = '', l
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>{title}</title>
+        {/* Admin-only theming: apply the theme cookie before the stylesheet
+            paints (auto|light|dark; see :root[data-theme] in styles.css).
+            Public pages never get the attribute and always render light. */}
+        {variant === 'admin' ? (
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){var m=document.cookie.match(/(?:^|; )theme=(dark|light)/);document.documentElement.dataset.theme=m?m[1]:'auto';})();`,
+            }}
+          ></script>
+        ) : null}
         <link rel="preload" href="/fonts/fraunces.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
         <link
           rel="preload"

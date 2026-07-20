@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { getCookie, setCookie } from 'hono/cookie';
 import type { AppEnv } from '../env';
 import { formatCents, isSupportedCurrency, parseAmountToCents } from '../lib/money';
 import { addDaysISO, isValidTimezone, todayInTz } from '../lib/dates';
@@ -760,6 +761,22 @@ admin.get('/reports', async (c) => {
 
 // ---------- Settings ----------
 
+type Theme = 'auto' | 'light' | 'dark';
+
+/** Display preference, per browser — a cookie, not a Settings (D1) column, so
+ *  the server renders the right theme with no flash and no prop threading. */
+function themeCookie(c: Context<AppEnv>): Theme {
+  const v = getCookie(c, 'theme');
+  return v === 'light' || v === 'dark' ? v : 'auto';
+}
+
+admin.post('/settings/appearance', async (c) => {
+  const body = (await c.req.parseBody()) as Record<string, string>;
+  const theme: Theme = body.theme === 'light' || body.theme === 'dark' ? body.theme : 'auto';
+  setCookie(c, 'theme', theme, { path: '/admin', maxAge: 60 * 60 * 24 * 365, sameSite: 'Lax' });
+  return c.redirect('/admin/settings?saved=1#appearance');
+});
+
 admin.get('/settings', async (c) => {
   // Lazy migration: re-encrypt any plaintext stored keys once a master key exists.
   await encryptStoredSecrets(c.env.DB, c.env, await getSettings(c.env.DB));
@@ -810,6 +827,7 @@ admin.get('/settings', async (c) => {
       resendKept={resendKept}
       accentKept={accentKeptQ}
       alerts={await configWarnings(c.env, settings, { localDev: isLocalRequest(c.req.raw) })}
+      theme={themeCookie(c)}
     />
   );
 });

@@ -28,28 +28,54 @@
   src: url('/fonts/instrument-sans-italic.woff2') format('woff2');
 }
 
+/* Theming: every var declares its light and dark value via light-dark(),
+   switched by color-scheme. The admin shell sets data-theme on <html> from
+   the `theme` cookie (see layout.tsx) — auto follows the system, light/dark
+   force it. Pages without the attribute (pay page, login, print) always
+   render light: customer-facing surfaces stay on-brand stationery. */
 :root {
-  --paper: #f6f4ee;
-  --surface: #fffefb;
-  --ink: #1d1a15;
-  --ink-soft: #6b6459;
-  --ink-faint: #756e61;
-  --line: #e6e1d6;
-  --line-strong: #cfc7b8;
-  --green: #1e5b43;
-  --green-deep: #144532;
-  --green-tint: #e9f0eb;
-  --amber: #8a6510;
-  --amber-tint: #f6eeda;
-  --rust: #a8402a;
-  --rust-tint: #f7e9e4;
-  --stone: #6b655a; /* 4.8:1 on stone-tint — badge text passes WCAG AA */
-  --stone-tint: #edeae2;
+  color-scheme: light;
+  --paper: light-dark(#f6f4ee, #1b1813);
+  --paper-deep: light-dark(#faf8f2, #2a2620);
+  --surface: light-dark(#fffefb, #23201a);
+  --ink: light-dark(#1d1a15, #ece7db);
+  --ink-soft: light-dark(#6b6459, #a89f90);
+  --ink-faint: light-dark(#756e61, #97907f);
+  --line: light-dark(#e6e1d6, #37332a);
+  --line-strong: light-dark(#cfc7b8, #4c4638);
+  --green: light-dark(#1e5b43, #82ba9c);
+  --green-deep: light-dark(#144532, #a3cfb6);
+  --green-tint: light-dark(#e9f0eb, #233830);
+  --green-line: light-dark(#cfdfd4, #35523f);
+  --amber: light-dark(#8a6510, #d9b05e);
+  --amber-tint: light-dark(#f6eeda, #39301a);
+  --amber-line: light-dark(#e8d9b4, #5a4a26);
+  --rust: light-dark(#a8402a, #e08d77);
+  --rust-deep: light-dark(#7c2f1e, #f2b6a4);
+  --rust-tint: light-dark(#f7e9e4, #3d251e);
+  --rust-line: light-dark(#e6c6ba, #5c3527);
+  --stone: light-dark(#6b655a, #a89f90); /* 4.8:1 on stone-tint — badge text passes WCAG AA */
+  --stone-tint: light-dark(#edeae2, #2d2a23);
+  --stone-line: light-dark(#ddd8cc, #464135);
+  /* Text on solid accent fills (green buttons, overdue badge) — accents are
+     dark pigments in light mode, lifted pastels in dark mode */
+  --on-accent: light-dark(#fdfdf9, #17140f);
+  --focus-ring: light-dark(rgba(30, 91, 67, 0.18), rgba(130, 186, 156, 0.35));
+  --focus-ring-danger: light-dark(rgba(168, 64, 42, 0.14), rgba(224, 141, 119, 0.3));
   --radius: 8px;
   --radius-sm: 5px;
-  --shadow: 0 1px 2px rgba(29, 26, 21, 0.05), 0 4px 16px rgba(29, 26, 21, 0.05);
+  --shadow: 0 1px 2px light-dark(rgba(29, 26, 21, 0.05), rgba(0, 0, 0, 0.3)),
+    0 4px 16px light-dark(rgba(29, 26, 21, 0.05), rgba(0, 0, 0, 0.3));
   --font-display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
   --font-ui: 'Instrument Sans', 'Avenir Next', 'Segoe UI', sans-serif;
+}
+
+:root[data-theme='auto'] {
+  color-scheme: light dark;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 * {
@@ -339,7 +365,7 @@ h2 {
 }
 
 .filter-tabs a.active {
-  color: #fdfdf9;
+  color: var(--on-accent);
   background: var(--green);
   border-color: var(--green);
 }
@@ -470,7 +496,7 @@ table.table tbody tr {
 }
 
 table.table tbody tr:hover {
-  background: #faf8f2;
+  background: var(--paper-deep);
 }
 
 table.table tbody tr[data-href] {
@@ -502,19 +528,19 @@ table.table td.text-right {
 .badge-draft {
   color: var(--stone);
   background: var(--stone-tint);
-  border-color: #ddd8cc;
+  border-color: var(--stone-line);
 }
 
 .badge-sent {
   color: var(--amber);
   background: var(--amber-tint);
-  border-color: #e8d9b4;
+  border-color: var(--amber-line);
 }
 
 .badge-paid {
   color: var(--green);
   background: var(--green-tint);
-  border-color: #cfdfd4;
+  border-color: var(--green-line);
 }
 
 .badge-void {
@@ -525,7 +551,7 @@ table.table td.text-right {
 }
 
 .badge-overdue {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--rust);
   border-color: var(--rust);
 }
@@ -584,7 +610,7 @@ button:focus-visible,
 a:focus-visible {
   outline: none;
   border-color: var(--green);
-  box-shadow: 0 0 0 3px rgba(30, 91, 67, 0.18);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 a:focus-visible,
@@ -596,7 +622,7 @@ input.field-invalid,
 select.field-invalid,
 textarea.field-invalid {
   border-color: var(--rust);
-  box-shadow: 0 0 0 3px rgba(168, 64, 42, 0.14);
+  box-shadow: 0 0 0 3px var(--focus-ring-danger);
 }
 
 input[readonly] {
@@ -735,13 +761,13 @@ textarea::placeholder {
 
 .btn-primary {
   background: var(--green);
-  color: #fdfdf9;
+  color: var(--on-accent);
   box-shadow: 0 1px 2px rgba(20, 69, 50, 0.35);
 }
 
 .btn-primary:hover {
   background: var(--green-deep);
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: 0 3px 10px rgba(20, 69, 50, 0.28);
 }
 
@@ -760,13 +786,13 @@ textarea::placeholder {
 .btn-danger {
   background: transparent;
   color: var(--rust);
-  border-color: #e0bfb4;
+  border-color: var(--rust-line);
 }
 
 .btn-danger:hover {
   background: var(--rust);
   border-color: var(--rust);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .btn-sm {
@@ -788,19 +814,19 @@ textarea::placeholder {
 
 .banner-success {
   background: var(--green-tint);
-  border-color: #cfdfd4;
+  border-color: var(--green-line);
   color: var(--green-deep);
 }
 
 .banner-error {
   background: var(--rust-tint);
-  border-color: #e6c6ba;
-  color: #7c2f1e;
+  border-color: var(--rust-line);
+  color: var(--rust-deep);
 }
 
 .banner-warning {
   background: var(--amber-tint);
-  border-color: #e8d9b4;
+  border-color: var(--amber-line);
   color: var(--amber);
 }
 
@@ -987,7 +1013,7 @@ textarea::placeholder {
 .report-total td {
   font-weight: 700;
   border-top: 1px solid var(--line-strong);
-  background: #faf8f2;
+  background: var(--paper-deep);
 }
 
 /* Inline action rows (record payment, sent date, pay link): button sits on
@@ -1320,7 +1346,7 @@ a .ref {
   }
 
   table.table--stack tr.report-total {
-    background: #faf8f2;
+    background: var(--paper-deep);
   }
 
   /* Note editor takes its own full-width line inside a stacked cell */
