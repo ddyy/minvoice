@@ -26,6 +26,7 @@ export const fr: Strings = {
   downloadPdf: 'Télécharger le PDF',
   viewOnline: 'Voir en ligne',
   paymentConfirming: 'Merci ! Votre paiement est en cours de confirmation — cette page l’affichera sous peu.',
+  paymentUnderReview: 'Un paiement pour cette facture a été reçu et est en cours de vérification — merci de ne pas payer à nouveau. Contactez-nous pour toute question.',
   invoicePaid: 'Cette facture a été payée.',
   invoicePaidThanks: 'Cette facture a été payée — merci !',
   invoiceVoided: 'Cette facture a été annulée.',

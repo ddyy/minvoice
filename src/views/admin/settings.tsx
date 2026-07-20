@@ -1,6 +1,6 @@
 import { Layout } from '../layout';
 import { LOCALE_OPTIONS } from '../../lib/strings';
-import { formatTaxRate, isSupportedCurrency } from '../../lib/money';
+import { currencyOptions, formatTaxRate } from '../../lib/money';
 import type { Settings } from '../../db/queries';
 import type { ConfigWarning } from '../../lib/config';
 import type { KeySource } from '../../lib/providers';
@@ -26,17 +26,6 @@ export function timezoneOptions(): string[] {
     return (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone') ?? ['UTC'];
   } catch {
     return ['UTC'];
-  }
-}
-
-export function currencyOptions(): { code: string; name: string }[] {
-  try {
-    const codes: string[] =
-      (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('currency') ?? ['USD'];
-    const names = new Intl.DisplayNames('en', { type: 'currency' });
-    return codes.filter(isSupportedCurrency).map((code) => ({ code, name: names.of(code) ?? code }));
-  } catch {
-    return [{ code: 'USD', name: 'US Dollar' }];
   }
 }
 

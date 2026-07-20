@@ -45,12 +45,26 @@ async function paypalFetch(env: Bindings, path: string, init: RequestInit & { id
   return res.json();
 }
 
+/**
+ * PayPal-Request-Id for order creation — PayPal caps it at 38 bytes, so the
+ * financial identity (id, total, currency, revision) is SHA-256-compressed.
+ * It must change whenever those fields change: PayPal returns the ORIGINAL
+ * order for a reused id, so a stale key would redirect payers to a pre-edit
+ * order. updated_at acts as the invoice revision.
+ */
+export async function orderIdempotencyKey(invoice: Invoice): Promise<string> {
+  const material = `${invoice.id}|${invoice.total_cents}|${invoice.currency}|${invoice.updated_at}`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material));
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `mv-order-${hex.slice(0, 29)}`; // 9 + 29 = 38 chars, the documented maximum
+}
+
 /** Create an order and return { orderId, approveUrl } for the payer redirect. */
 export async function createOrder(env: Bindings, invoice: Invoice): Promise<{ orderId: string; approveUrl: string }> {
   const payUrl = `${env.APP_BASE_URL}/pay/${invoice.public_token}`;
   const order = (await paypalFetch(env, '/v2/checkout/orders', {
     method: 'POST',
-    idempotencyKey: `minvoice-order-${invoice.id}-${invoice.total_cents}`,
+    idempotencyKey: await orderIdempotencyKey(invoice),
     body: JSON.stringify({
       intent: 'CAPTURE',
       purchase_units: [

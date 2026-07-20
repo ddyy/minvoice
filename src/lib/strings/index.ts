@@ -43,6 +43,7 @@ export type Strings = {
   downloadPdf: string;
   viewOnline: string;
   paymentConfirming: string;
+  paymentUnderReview: string;
   invoicePaid: string;
   invoicePaidThanks: string;
   invoiceVoided: string;

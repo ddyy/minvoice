@@ -10,6 +10,8 @@ type Props = {
   settings: Settings;
   justPaid: boolean;
   canceled: boolean;
+  /** Active provider payment that didn't match the invoice — checkout is suppressed (see awaitingPaymentReview) */
+  underReview?: boolean;
   /** Which payment providers have credentials configured — unconfigured buttons are hidden. */
   providers: { stripe: boolean; paypal: boolean };
 };
@@ -33,7 +35,7 @@ export function DraftHold({ invoice, settings }: { invoice: InvoiceWithClient; s
   );
 }
 
-export function PublicInvoice({ invoice, items, settings, justPaid, providers }: Props) {
+export function PublicInvoice({ invoice, items, settings, justPaid, underReview, providers }: Props) {
   const cur = invoice.currency;
   const tag = resolveLocale(settings.locale, invoice.client_locale);
   const t = getStrings(tag);
@@ -42,7 +44,9 @@ export function PublicInvoice({ invoice, items, settings, justPaid, providers }:
   const payable = invoice.status === 'sent';
   return (
     <Layout title={`${t.invoice} ${invoice.number} — ${settings.business_name}`} variant="public" lang={tag}>
-      {justPaid && invoice.status !== 'paid' ? (
+      {underReview ? (
+        <div class="banner banner-warning">{t.paymentUnderReview}</div>
+      ) : justPaid && invoice.status !== 'paid' ? (
         <div class="banner banner-success">
           {t.paymentConfirming}
         </div>

@@ -24,6 +24,7 @@ export const en: Strings = {
   downloadPdf: 'Download PDF',
   viewOnline: 'View online',
   paymentConfirming: 'Thank you! Your payment is being confirmed — this page will show it shortly.',
+  paymentUnderReview: 'A payment for this invoice has been received and is under review — please do not pay again. Contact us with any questions.',
   invoicePaid: 'This invoice has been paid.',
   invoicePaidThanks: 'This invoice has been paid — thank you!',
   invoiceVoided: 'This invoice has been voided.',

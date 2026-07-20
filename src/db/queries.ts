@@ -416,6 +416,21 @@ export async function getPayments(db: D1Database, invoiceId: number): Promise<Pa
   ).results;
 }
 
+/**
+ * A still-open invoice with an active PROVIDER payment is awaiting manual
+ * review: a matching provider payment would have transitioned it to paid
+ * (markInvoicePaidFromWebhook), so its presence means the payment didn't
+ * match the invoice's current total/currency. Checkout is suppressed until
+ * an admin resolves it — otherwise the customer could pay twice. Manual
+ * payments don't count: partial payments legitimately coexist with checkout.
+ */
+export function awaitingPaymentReview(
+  invoice: Pick<Invoice, 'status'>,
+  payments: Pick<Payment, 'provider' | 'undone_at'>[]
+): boolean {
+  return invoice.status === 'sent' && payments.some((p) => p.provider !== 'manual' && !p.undone_at);
+}
+
 export type ItemDraft = ItemInput & { description: string };
 
 export type InvoiceDraft = {
@@ -424,6 +439,8 @@ export type InvoiceDraft = {
   due_date: string | null;
   subject: string | null;
   notes: string | null;
+  /** Validated ISO code; omitted = settings currency (create) / keep current (update) */
+  currency?: string;
   items: ItemDraft[];
 };
 
@@ -449,7 +466,7 @@ export async function createInvoice(db: D1Database, draft: InvoiceDraft, customN
       .bind(
         number,
         draft.client_id,
-        settings.currency,
+        draft.currency || settings.currency,
         draft.issue_date,
         draft.due_date,
         draft.subject,
@@ -486,12 +503,13 @@ export async function updateInvoice(
   await db.batch([
     db
       .prepare(
-        `UPDATE invoices SET client_id = ?, issue_date = ?, due_date = ?, subject = ?, notes = ?,
+        `UPDATE invoices SET client_id = ?, currency = ?, issue_date = ?, due_date = ?, subject = ?, notes = ?,
           subtotal_cents = ?, tax_cents = ?, total_cents = ?, updated_at = datetime('now')
          WHERE id = ?`
       )
       .bind(
         draft.client_id ?? inv.client_id,
+        draft.currency || inv.currency,
         draft.issue_date,
         draft.due_date,
         draft.subject,
@@ -750,57 +768,70 @@ export async function recordManualPayment(
 
 export type MonthlyReportRow = {
   ym: string; // "2026-07"
+  currency: string;
   invoiced_count: number;
   invoiced_cents: number;
   received_count: number;
   received_cents: number;
 };
 
-export type ReportSummary = {
+export type CurrencySums = {
+  currency: string;
   outstanding_cents: number; // sent, not yet paid
+  received_ytd_cents: number;
+};
+
+export type ReportSummary = {
   outstanding_count: number;
   overdue_count: number;
-  received_ytd_cents: number;
+  /** One entry per currency with activity — amounts are NEVER summed across currencies */
+  by_currency: CurrencySums[];
 };
 
 /**
  * Per-month activity, newest first. "Invoiced" = non-draft, non-void invoices
- * by issue date; "received" = payment rows by receipt date.
+ * by issue date; "received" = payment rows by receipt date. Rows are grouped
+ * by (month, currency) — amounts in different currencies are never summed.
+ * Payments group by their own settled currency, not the invoice's, so any
+ * processor-side mismatch stays visible.
  */
 export async function monthlyReport(db: D1Database, clientId: number | null = null): Promise<MonthlyReportRow[]> {
   // ?1 = client filter; NULL means all clients (the OR short-circuits it)
-  const [inv, pay] = await db.batch<{ ym: string; n: number; total: number }>([
+  const [inv, pay] = await db.batch<{ ym: string; currency: string; n: number; total: number }>([
     db.prepare(
-      `SELECT strftime('%Y-%m', issue_date) AS ym, COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS total
-       FROM invoices WHERE status IN ('sent', 'paid') AND (?1 IS NULL OR client_id = ?1) GROUP BY ym`
+      `SELECT strftime('%Y-%m', issue_date) AS ym, currency, COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS total
+       FROM invoices WHERE status IN ('sent', 'paid') AND (?1 IS NULL OR client_id = ?1) GROUP BY ym, currency`
     ).bind(clientId),
     db.prepare(
-      `SELECT strftime('%Y-%m', p.created_at) AS ym, COUNT(*) AS n, COALESCE(SUM(p.amount_cents), 0) AS total
+      `SELECT strftime('%Y-%m', p.created_at) AS ym, p.currency, COUNT(*) AS n, COALESCE(SUM(p.amount_cents), 0) AS total
        FROM payments p JOIN invoices i ON i.id = p.invoice_id
-       WHERE p.undone_at IS NULL AND (?1 IS NULL OR i.client_id = ?1) GROUP BY ym`
+       WHERE p.undone_at IS NULL AND (?1 IS NULL OR i.client_id = ?1) GROUP BY ym, p.currency`
     ).bind(clientId),
   ]);
 
   const months = new Map<string, MonthlyReportRow>();
-  const row = (ym: string): MonthlyReportRow => {
-    let r = months.get(ym);
+  const row = (ym: string, currency: string): MonthlyReportRow => {
+    const key = `${ym}|${currency}`;
+    let r = months.get(key);
     if (!r) {
-      r = { ym, invoiced_count: 0, invoiced_cents: 0, received_count: 0, received_cents: 0 };
-      months.set(ym, r);
+      r = { ym, currency, invoiced_count: 0, invoiced_cents: 0, received_count: 0, received_cents: 0 };
+      months.set(key, r);
     }
     return r;
   };
   for (const r of inv.results) {
-    const m = row(r.ym);
+    const m = row(r.ym, r.currency);
     m.invoiced_count = r.n;
     m.invoiced_cents = r.total;
   }
   for (const r of pay.results) {
-    const m = row(r.ym);
+    const m = row(r.ym, r.currency);
     m.received_count = r.n;
     m.received_cents = r.total;
   }
-  return [...months.values()].sort((a, b) => (a.ym < b.ym ? 1 : -1));
+  return [...months.values()].sort((a, b) =>
+    a.ym === b.ym ? (a.currency < b.currency ? -1 : 1) : a.ym < b.ym ? 1 : -1
+  );
 }
 
 export type PaymentListRow = {
@@ -846,25 +877,57 @@ export async function reportSummary(
   today: string,
   clientId: number | null = null
 ): Promise<ReportSummary> {
-  const row = await db
-    .prepare(
-      `SELECT
-        (SELECT COALESCE(SUM(total_cents), 0) FROM invoices
-          WHERE status = 'sent' AND (?2 IS NULL OR client_id = ?2)) AS outstanding_cents,
-        (SELECT COUNT(*) FROM invoices
-          WHERE status = 'sent' AND (?2 IS NULL OR client_id = ?2)) AS outstanding_count,
-        (SELECT COUNT(*) FROM invoices
-          WHERE status = 'sent' AND due_date IS NOT NULL AND due_date < ?1
-            AND (?2 IS NULL OR client_id = ?2)) AS overdue_count,
-        (SELECT COALESCE(SUM(p.amount_cents), 0) FROM payments p JOIN invoices i ON i.id = p.invoice_id
-          WHERE p.undone_at IS NULL
-            AND strftime('%Y', p.created_at) = substr(?1, 1, 4)
-            AND (?2 IS NULL OR i.client_id = ?2)) AS received_ytd_cents`
-    )
-    .bind(today, clientId)
-    .first<ReportSummary>();
+  const [counts, outstanding, received] = await db.batch([
+    db
+      .prepare(
+        `SELECT
+          (SELECT COUNT(*) FROM invoices
+            WHERE status = 'sent' AND (?2 IS NULL OR client_id = ?2)) AS outstanding_count,
+          (SELECT COUNT(*) FROM invoices
+            WHERE status = 'sent' AND due_date IS NOT NULL AND due_date < ?1
+              AND (?2 IS NULL OR client_id = ?2)) AS overdue_count`
+      )
+      .bind(today, clientId),
+    db
+      .prepare(
+        `SELECT currency, COALESCE(SUM(total_cents), 0) AS cents FROM invoices
+         WHERE status = 'sent' AND (?1 IS NULL OR client_id = ?1) GROUP BY currency`
+      )
+      .bind(clientId),
+    db
+      .prepare(
+        `SELECT p.currency, COALESCE(SUM(p.amount_cents), 0) AS cents
+         FROM payments p JOIN invoices i ON i.id = p.invoice_id
+         WHERE p.undone_at IS NULL
+           AND strftime('%Y', p.created_at) = substr(?1, 1, 4)
+           AND (?2 IS NULL OR i.client_id = ?2) GROUP BY p.currency`
+      )
+      .bind(today, clientId),
+  ]);
+
+  const row = counts.results[0] as { outstanding_count: number; overdue_count: number } | undefined;
   if (!row) throw new Error('report summary query returned nothing');
-  return row;
+
+  const byCurrency = new Map<string, CurrencySums>();
+  const sums = (currency: string): CurrencySums => {
+    let s = byCurrency.get(currency);
+    if (!s) {
+      s = { currency, outstanding_cents: 0, received_ytd_cents: 0 };
+      byCurrency.set(currency, s);
+    }
+    return s;
+  };
+  for (const r of outstanding.results as { currency: string; cents: number }[]) {
+    sums(r.currency).outstanding_cents = r.cents;
+  }
+  for (const r of received.results as { currency: string; cents: number }[]) {
+    sums(r.currency).received_ytd_cents = r.cents;
+  }
+  return {
+    outstanding_count: row.outstanding_count,
+    overdue_count: row.overdue_count,
+    by_currency: [...byCurrency.values()].sort((a, b) => (a.currency < b.currency ? -1 : 1)),
+  };
 }
 
 /**
@@ -966,13 +1029,19 @@ export async function markInvoicePaidFromWebhook(
     currency: p.currency,
     provider: p.provider === 'stripe' ? 'Stripe' : 'PayPal',
   });
+  // The paid transition (and its emails) additionally require the payment to
+  // match the invoice's CURRENT total and currency: checkout sessions created
+  // before an edit stay completable at the provider, and a stale USD payment
+  // must not close a now-EUR invoice. Mismatches still record the payment row
+  // below — the money did move — but the invoice stays open for manual review.
+  const matchGuard = `AND total_cents = ?4 AND currency = ?5`;
   const enqueue = (kind: string) =>
     db
       .prepare(
         `INSERT INTO email_outbox (kind, payload)
-         SELECT ?, ? WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ? AND status IN ('draft', 'sent'))`
+         SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM invoices WHERE id = ?3 AND status IN ('draft', 'sent') ${matchGuard})`
       )
-      .bind(kind, emailPayload, p.invoiceId);
+      .bind(kind, emailPayload, p.invoiceId, p.amountCents, p.currency);
 
   let results: D1Result[];
   try {
@@ -996,9 +1065,9 @@ export async function markInvoicePaidFromWebhook(
       db
         .prepare(
           `UPDATE invoices SET status = 'paid', paid_at = datetime('now'), updated_at = datetime('now')
-           WHERE id = ? AND status IN ('draft', 'sent')`
+           WHERE id = ?1 AND status IN ('draft', 'sent') AND total_cents = ?2 AND currency = ?3`
         )
-        .bind(p.invoiceId),
+        .bind(p.invoiceId, p.amountCents, p.currency),
     ]);
   } catch (e) {
     // Only webhook_events can raise UNIQUE here (payments handles its own

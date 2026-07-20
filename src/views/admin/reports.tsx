@@ -12,10 +12,13 @@ function monthLabel(ym: string): string {
   return MONTH_NAMES[m - 1] ?? ym;
 }
 
+type CurrencyTotals = Omit<MonthlyReportRow, 'ym'>;
+
 type YearGroup = {
   year: string;
   rows: MonthlyReportRow[];
-  totals: Omit<MonthlyReportRow, 'ym'>;
+  /** One totals line per currency — never summed across currencies */
+  totals: CurrencyTotals[];
 };
 
 function groupByYear(rows: MonthlyReportRow[]): YearGroup[] {
@@ -24,15 +27,21 @@ function groupByYear(rows: MonthlyReportRow[]): YearGroup[] {
     const year = r.ym.slice(0, 4);
     let g = groups[groups.length - 1];
     if (!g || g.year !== year) {
-      g = { year, rows: [], totals: { invoiced_count: 0, invoiced_cents: 0, received_count: 0, received_cents: 0 } };
+      g = { year, rows: [], totals: [] };
       groups.push(g);
     }
     g.rows.push(r);
-    g.totals.invoiced_count += r.invoiced_count;
-    g.totals.invoiced_cents += r.invoiced_cents;
-    g.totals.received_count += r.received_count;
-    g.totals.received_cents += r.received_cents;
+    let t = g.totals.find((t) => t.currency === r.currency);
+    if (!t) {
+      t = { currency: r.currency, invoiced_count: 0, invoiced_cents: 0, received_count: 0, received_cents: 0 };
+      g.totals.push(t);
+    }
+    t.invoiced_count += r.invoiced_count;
+    t.invoiced_cents += r.invoiced_cents;
+    t.received_count += r.received_count;
+    t.received_cents += r.received_cents;
   }
+  for (const g of groups) g.totals.sort((a, b) => (a.currency < b.currency ? -1 : 1));
   return groups;
 }
 
@@ -52,6 +61,14 @@ export function ReportsPage({
   clientId: number | null;
 }) {
   const years = groupByYear(months);
+  // Settings currency first, then alphabetical; zero row so empty tiles still render
+  const sums = summary.by_currency.length
+    ? [...summary.by_currency].sort((a, b) =>
+        a.currency === currency ? -1 : b.currency === currency ? 1 : a.currency < b.currency ? -1 : 1
+      )
+    : [{ currency, outstanding_cents: 0, received_ytd_cents: 0 }];
+  // Currency column/labels only appear once a second currency exists
+  const multiCurrency = new Set([...months.map((r) => r.currency), ...sums.map((s) => s.currency)]).size > 1;
 
   return (
     <Layout title="Reports" currentPath={currentPath}>
@@ -82,7 +99,9 @@ export function ReportsPage({
       <div class="stat-grid">
         <div class="card stat">
           <span class="stat-label">Outstanding</span>
-          <span class="stat-value">{formatCents(summary.outstanding_cents, currency)}</span>
+          {sums.map((s) => (
+            <span class="stat-value">{formatCents(s.outstanding_cents, s.currency)}</span>
+          ))}
           <span class="muted">
             {summary.outstanding_count} open invoice{summary.outstanding_count === 1 ? '' : 's'}
           </span>
@@ -94,7 +113,9 @@ export function ReportsPage({
         </div>
         <div class="card stat">
           <span class="stat-label">Received this year</span>
-          <span class="stat-value">{formatCents(summary.received_ytd_cents, currency)}</span>
+          {sums.map((s) => (
+            <span class="stat-value">{formatCents(s.received_ytd_cents, s.currency)}</span>
+          ))}
           <span class="muted">all providers</span>
         </div>
       </div>
@@ -111,6 +132,7 @@ export function ReportsPage({
               <thead>
                 <tr>
                   <th>Month</th>
+                  {multiCurrency ? <th>Currency</th> : null}
                   <th class="text-right">Invoices sent</th>
                   <th class="text-right">Invoiced</th>
                   <th class="text-right">Payments</th>
@@ -121,35 +143,39 @@ export function ReportsPage({
                 {g.rows.map((r) => (
                   <tr>
                     <td data-label="Month">{monthLabel(r.ym)}</td>
+                    {multiCurrency ? <td data-label="Currency">{r.currency}</td> : null}
                     <td class="text-right" data-label="Invoices sent">
                       {r.invoiced_count || <span class="muted">—</span>}
                     </td>
                     <td class="text-right" data-label="Invoiced">
-                      {r.invoiced_cents ? formatCents(r.invoiced_cents, currency) : <span class="muted">—</span>}
+                      {r.invoiced_cents ? formatCents(r.invoiced_cents, r.currency) : <span class="muted">—</span>}
                     </td>
                     <td class="text-right" data-label="Payments">
                       {r.received_count || <span class="muted">—</span>}
                     </td>
                     <td class="text-right" data-label="Received">
-                      {r.received_cents ? formatCents(r.received_cents, currency) : <span class="muted">—</span>}
+                      {r.received_cents ? formatCents(r.received_cents, r.currency) : <span class="muted">—</span>}
                     </td>
                   </tr>
                 ))}
-                <tr class="report-total">
-                  <td>Total</td>
-                  <td class="text-right" data-label="Invoices sent">
-                    {g.totals.invoiced_count}
-                  </td>
-                  <td class="text-right" data-label="Invoiced">
-                    {formatCents(g.totals.invoiced_cents, currency)}
-                  </td>
-                  <td class="text-right" data-label="Payments">
-                    {g.totals.received_count}
-                  </td>
-                  <td class="text-right" data-label="Received">
-                    {formatCents(g.totals.received_cents, currency)}
-                  </td>
-                </tr>
+                {g.totals.map((t) => (
+                  <tr class="report-total">
+                    <td>Total</td>
+                    {multiCurrency ? <td data-label="Currency">{t.currency}</td> : null}
+                    <td class="text-right" data-label="Invoices sent">
+                      {t.invoiced_count}
+                    </td>
+                    <td class="text-right" data-label="Invoiced">
+                      {formatCents(t.invoiced_cents, t.currency)}
+                    </td>
+                    <td class="text-right" data-label="Payments">
+                      {t.received_count}
+                    </td>
+                    <td class="text-right" data-label="Received">
+                      {formatCents(t.received_cents, t.currency)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

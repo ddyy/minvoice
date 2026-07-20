@@ -209,6 +209,10 @@ async function invoiceHeaderProblems(
   if (due && issue && due < issue) {
     problems.push(`Due date (${due}) is before the issue date (${issue}).`);
   }
+  const currency = str(body.currency).trim().toUpperCase();
+  if (currency && !isSupportedCurrency(currency)) {
+    problems.push(`Currency "${currency}" isn't supported (unknown code, or a zero-decimal currency like JPY).`);
+  }
   return problems;
 }
 
@@ -275,6 +279,7 @@ admin.post('/invoices/new', async (c) => {
           client_id: str(body.client_id),
           issue_date: str(body.issue_date),
           due_date: str(body.due_date),
+          currency: str(body.currency),
           subject: str(body.subject),
           notes: str(body.notes),
           item_description: arr(body['item_description[]']),
@@ -305,6 +310,7 @@ admin.post('/invoices/new', async (c) => {
         due_date: str(body.due_date) || null,
         subject: str(body.subject).trim() || null,
         notes: str(body.notes) || null,
+        currency: str(body.currency).trim().toUpperCase() || undefined,
         items,
       },
       customNumber
@@ -407,6 +413,7 @@ admin.post('/invoices/:id/edit', async (c) => {
           client_id: str(body.client_id),
           issue_date: str(body.issue_date),
           due_date: str(body.due_date),
+          currency: str(body.currency),
           subject: str(body.subject),
           notes: str(body.notes),
           item_description: arr(body['item_description[]']),
@@ -424,6 +431,7 @@ admin.post('/invoices/:id/edit', async (c) => {
     due_date: str(body.due_date) || null,
     subject: str(body.subject).trim() || null,
     notes: str(body.notes) || null,
+    currency: str(body.currency).trim().toUpperCase() || undefined,
     items,
   });
   await logInvoiceEvent(c.env.DB, id, 'edited');
@@ -544,6 +552,7 @@ admin.post('/invoices/:id/duplicate', async (c) => {
     due_date: terms > 0 ? addDaysISO(today, terms) : null,
     subject: source.subject,
     notes: source.notes,
+    currency: source.currency,
     items: items.map((it) => ({
       description: it.description,
       quantity: it.quantity,

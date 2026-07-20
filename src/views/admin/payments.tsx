@@ -52,7 +52,15 @@ export function PaymentsPage({
   clientId: number | null;
 }) {
   const active = payments.filter((p) => !p.undone_at);
-  const receivedCents = active.reduce((sum, p) => sum + p.amount_cents, 0);
+  // One sum per currency — amounts in different currencies are never added together
+  const receivedByCurrency = new Map<string, number>();
+  for (const p of active) {
+    receivedByCurrency.set(p.currency, (receivedByCurrency.get(p.currency) ?? 0) + p.amount_cents);
+  }
+  const receivedTotals = [...receivedByCurrency.entries()]
+    .sort(([a], [b]) => (a === currency ? -1 : b === currency ? 1 : a < b ? -1 : 1))
+    .map(([cur, cents]) => formatCents(cents, cur))
+    .join(' + ');
 
   return (
     <Layout title="Payments" currentPath={currentPath}>
@@ -89,7 +97,7 @@ export function PaymentsPage({
         <div class="card">
           <p class="muted">
             {active.length} payment{active.length === 1 ? '' : 's'} ·{' '}
-            {formatCents(receivedCents, currency)} received
+            {receivedTotals || formatCents(0, currency)} received
           </p>
           <table class="table table--stack">
             <thead>

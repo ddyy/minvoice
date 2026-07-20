@@ -7,6 +7,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index';
 import {
+  awaitingPaymentReview,
   cancelOutboxRow,
   clearLoginAttempts,
   createClient,
@@ -14,10 +15,13 @@ import {
   enqueueReminder,
   getInvoice,
   getInvoiceItems,
+  getPayments,
   listDueOutbox,
   markInvoicePaidFromWebhook,
   markInvoiceSent,
   markReminderSent,
+  monthlyReport,
+  reportSummary,
   recordLoginAttempt,
   updateInvoice,
   type WebhookPayment,
@@ -392,5 +396,137 @@ describe('login rate limiting', () => {
     await clearLoginAttempts(DB, ip);
 
     expect(await recordLoginAttempt(DB, ip, LOGIN_WINDOW_MINUTES)).toBe(1);
+  });
+});
+
+describe('multi-currency invoices and reports', () => {
+  async function seedTwoCurrencies(): Promise<{ usd: number; eur: number }> {
+    const clientId = await createClient(DB, {
+      name: 'Global GmbH',
+      email: 'ap@global.test',
+      address: null,
+      default_rate_cents: null,
+      payment_terms_days: null,
+    });
+    const usd = await createInvoice(DB, {
+      client_id: clientId,
+      issue_date: '2026-07-01',
+      due_date: null,
+      subject: null,
+      notes: null,
+      items: [{ description: 'Design', quantity: 1, unit_price_cents: 10000 }],
+    });
+    const eur = await createInvoice(DB, {
+      client_id: clientId,
+      issue_date: '2026-07-02',
+      due_date: null,
+      subject: null,
+      notes: null,
+      currency: 'EUR',
+      items: [{ description: 'Dev', quantity: 1, unit_price_cents: 5000 }],
+    });
+    await markInvoiceSent(DB, usd);
+    await markInvoiceSent(DB, eur);
+    return { usd, eur };
+  }
+
+  it('createInvoice takes the draft currency, defaulting to settings', async () => {
+    const { usd, eur } = await seedTwoCurrencies();
+    expect((await getInvoice(DB, usd))!.currency).toBe('USD');
+    expect((await getInvoice(DB, eur))!.currency).toBe('EUR');
+  });
+
+  it('updateInvoice can change the currency and keeps it when omitted', async () => {
+    const { usd } = await seedTwoCurrencies();
+    const items = [{ description: 'Design', quantity: 1, unit_price_cents: 10000 }];
+    await updateInvoice(DB, usd, {
+      issue_date: '2026-07-01', due_date: null, subject: null, notes: null, currency: 'GBP', items,
+    });
+    expect((await getInvoice(DB, usd))!.currency).toBe('GBP');
+    await updateInvoice(DB, usd, {
+      issue_date: '2026-07-01', due_date: null, subject: null, notes: null, items,
+    });
+    expect((await getInvoice(DB, usd))!.currency).toBe('GBP');
+  });
+
+  it('report sums are grouped per currency, never added together', async () => {
+    const { eur } = await seedTwoCurrencies();
+    await markInvoicePaidFromWebhook(
+      DB,
+      webhookPayload(eur, { amountCents: 5000, currency: 'EUR', providerRef: 'cs_eur', eventId: 'evt_eur' })
+    );
+
+    const today = new Date().toISOString().slice(0, 10);
+    const summary = await reportSummary(DB, today);
+    expect(summary.outstanding_count).toBe(1);
+    expect(summary.by_currency).toEqual([
+      { currency: 'EUR', outstanding_cents: 0, received_ytd_cents: 5000 },
+      { currency: 'USD', outstanding_cents: 10000, received_ytd_cents: 0 },
+    ]);
+
+    const invoiced = (await monthlyReport(DB))
+      .filter((r) => r.ym === '2026-07' && r.invoiced_count > 0)
+      .map((r) => [r.currency, r.invoiced_cents]);
+    expect(invoiced).toEqual([
+      ['EUR', 5000],
+      ['USD', 10000],
+    ]);
+  });
+});
+
+describe('stale-currency/amount webhooks', () => {
+  it('records the payment but refuses the paid transition on mismatch', async () => {
+    const id = await seedSentInvoice(10000); // USD 100.00
+    // Invoice edited to EUR after the checkout session was created
+    await updateInvoice(DB, id, {
+      issue_date: '2026-07-01', due_date: '2026-07-10', subject: 'Test', notes: null,
+      currency: 'EUR',
+      items: [{ description: 'Work', quantity: 1, unit_price_cents: 10000 }],
+    });
+
+    expect(await markInvoicePaidFromWebhook(DB, webhookPayload(id))).toBe('recorded'); // USD 10000
+    expect((await getInvoice(DB, id))?.status).toBe('sent'); // NOT paid
+    expect(
+      await DB.prepare('SELECT COUNT(*) FROM payments WHERE invoice_id = ?').bind(id).first<number>('COUNT(*)')
+    ).toBe(1); // money moved — payment row kept for manual review
+    expect(await DB.prepare('SELECT COUNT(*) FROM email_outbox').first<number>('COUNT(*)')).toBe(0); // no receipts
+
+    // A payment matching the CURRENT currency and total still transitions
+    expect(
+      await markInvoicePaidFromWebhook(
+        DB,
+        webhookPayload(id, { currency: 'EUR', eventId: 'evt_eur', providerRef: 'cs_eur' })
+      )
+    ).toBe('paid');
+    expect((await getInvoice(DB, id))?.status).toBe('paid');
+  });
+
+  it('refuses the transition on an amount mismatch too', async () => {
+    const id = await seedSentInvoice(10000);
+    expect(await markInvoicePaidFromWebhook(DB, webhookPayload(id, { amountCents: 5000 }))).toBe('recorded');
+    expect((await getInvoice(DB, id))?.status).toBe('sent');
+  });
+});
+
+describe('awaitingPaymentReview', () => {
+  it('suppresses checkout after a mismatched provider payment', async () => {
+    const id = await seedSentInvoice(10000);
+    // stale payment recorded, invoice stays sent (mismatch guard)
+    await markInvoicePaidFromWebhook(DB, webhookPayload(id, { amountCents: 5000 }));
+    const invoice = (await getInvoice(DB, id))!;
+    expect(invoice.status).toBe('sent');
+    expect(awaitingPaymentReview(invoice, await getPayments(DB, id))).toBe(true);
+  });
+
+  it('ignores manual partial payments and undone provider payments', async () => {
+    const id = await seedSentInvoice(10000);
+    expect(awaitingPaymentReview({ status: 'sent' }, [])).toBe(false);
+    // manual partial payment: checkout stays available
+    expect(awaitingPaymentReview({ status: 'sent' }, [{ provider: 'manual', undone_at: null }])).toBe(false);
+    // undone provider payment: resolved by the admin, checkout is back
+    expect(awaitingPaymentReview({ status: 'sent' }, [{ provider: 'stripe', undone_at: '2026-07-19' }])).toBe(false);
+    // paid invoices are handled by status, not review state
+    expect(awaitingPaymentReview({ status: 'paid' }, [{ provider: 'stripe', undone_at: null }])).toBe(false);
+    void id;
   });
 });

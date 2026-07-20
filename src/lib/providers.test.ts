@@ -91,6 +91,18 @@ describe('providerAvailability', () => {
     expect((await providerAvailability(e, settings({ stripe_enabled: 0 }))).stripe).toBe(false);
   });
 
+  it('gates each provider by its supported currency set', async () => {
+    const e = env({ STRIPE_SECRET_KEY: 'sk_live_x' });
+    const s = settings({ paypal_client_id: 'cid', paypal_client_secret: 'sec' });
+    expect(await providerAvailability(e, s, 'EUR')).toEqual({ stripe: true, paypal: true });
+    // AED: fine for Stripe, not a PayPal payment currency
+    expect(await providerAvailability(e, s, 'AED')).toEqual({ stripe: true, paypal: false });
+    // VES: in Intl but not a Stripe presentment currency (nor PayPal's list)
+    expect(await providerAvailability(e, s, 'VES')).toEqual({ stripe: false, paypal: false });
+    // no currency given (e.g. settings-level checks) -> credentials alone decide
+    expect(await providerAvailability(e, s)).toEqual({ stripe: true, paypal: true });
+  });
+
   it('an undecryptable boxed key makes the provider unavailable', async () => {
     const boxed = await box('unit-test-master-key-0123456789abcdef', 'sk_live_x');
     expect((await providerAvailability(env(), settings({ stripe_secret_key: boxed }))).stripe).toBe(false);

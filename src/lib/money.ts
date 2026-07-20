@@ -45,3 +45,15 @@ export function computeTotals(items: ItemInput[], taxRateBps: number) {
 export function formatTaxRate(bps: number): string {
   return `${(bps / 100).toFixed(2).replace(/\.?0+$/, '')}%`;
 }
+
+/** Supported currencies with display names — for the Settings and invoice-form pickers. */
+export function currencyOptions(): { code: string; name: string }[] {
+  try {
+    const codes: string[] =
+      (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('currency') ?? ['USD'];
+    const names = new Intl.DisplayNames('en', { type: 'currency' });
+    return codes.filter(isSupportedCurrency).map((code) => ({ code, name: names.of(code) ?? code }));
+  } catch {
+    return [{ code: 'USD', name: 'US Dollar' }];
+  }
+}

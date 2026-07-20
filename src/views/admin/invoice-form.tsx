@@ -1,5 +1,6 @@
 import { Layout } from '../layout';
 import { todayInTz } from '../../lib/dates';
+import { currencyOptions } from '../../lib/money';
 import type { Client, Invoice, InvoiceItem, Settings } from '../../db/queries';
 
 export type InvoiceFormProps = {
@@ -17,6 +18,7 @@ export type InvoiceFormProps = {
     client_id?: string;
     issue_date?: string;
     due_date?: string;
+    currency?: string;
     subject?: string;
     notes?: string;
     item_description?: string[];
@@ -62,6 +64,7 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
   const selectedClientId = fv?.client_id ?? (invoice ? String(invoice.client_id) : '');
   const issueDate = fv?.issue_date ?? invoice?.issue_date ?? todayInTz(settings.timezone);
   const dueDate = fv?.due_date ?? invoice?.due_date ?? '';
+  const currency = fv?.currency ?? invoice?.currency ?? settings.currency;
   const subject = fv?.subject ?? invoice?.subject ?? '';
   const notes = fv?.notes ?? invoice?.notes ?? '';
 
@@ -146,6 +149,16 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
             <div class="form-group">
               <label for="due_date">Due date</label>
               <input type="date" id="due_date" name="due_date" value={dueDate} />
+            </div>
+            <div class="form-group">
+              <label for="currency">Currency</label>
+              <select id="currency" name="currency">
+                {currencyOptions().map((c) => (
+                  <option value={c.code} selected={c.code === currency}>
+                    {c.code} — {c.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

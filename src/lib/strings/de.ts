@@ -26,6 +26,7 @@ export const de: Strings = {
   downloadPdf: 'PDF herunterladen',
   viewOnline: 'Online ansehen',
   paymentConfirming: 'Vielen Dank! Ihre Zahlung wird bestätigt — diese Seite zeigt sie in Kürze an.',
+  paymentUnderReview: 'Für diese Rechnung ist bereits eine Zahlung eingegangen und wird geprüft — bitte zahlen Sie nicht erneut. Bei Fragen kontaktieren Sie uns.',
   invoicePaid: 'Diese Rechnung wurde bezahlt.',
   invoicePaidThanks: 'Diese Rechnung wurde bezahlt — vielen Dank!',
   invoiceVoided: 'Diese Rechnung wurde storniert.',

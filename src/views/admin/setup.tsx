@@ -1,5 +1,6 @@
 import { Layout } from '../layout';
-import { currencyOptions, timezoneOptions } from './settings';
+import { timezoneOptions } from './settings';
+import { currencyOptions } from '../../lib/money';
 
 export type SetupFormValues = {
   business_name?: string;

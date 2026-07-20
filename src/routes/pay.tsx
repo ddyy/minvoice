@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AppEnv } from '../env';
 import {
+  awaitingPaymentReview,
   getInvoiceByToken,
   getInvoiceItems,
   getLogo,
+  getPayments,
   getSettings,
   markInvoicePaidFromWebhook,
   recordInvoiceView,
@@ -60,9 +62,10 @@ pay.get('/:token', async (c) => {
       recordInvoiceView(c.env.DB, invoice.id, view.geo).catch((e) => console.error('view tracking failed', e))
     );
   }
-  const [items, settings] = await Promise.all([
+  const [items, settings, payments] = await Promise.all([
     getInvoiceItems(c.env.DB, invoice.id),
     getSettings(c.env.DB),
+    getPayments(c.env.DB, invoice.id),
   ]);
   // Keep the traffic-derived origin fresh for cron-built pay links (writes
   // only when it changes — effectively once per deployment hostname).
@@ -73,6 +76,7 @@ pay.get('/:token', async (c) => {
   if (invoice.status === 'draft') {
     return c.html(<DraftHold invoice={invoice} settings={settings} />);
   }
+  const underReview = awaitingPaymentReview(invoice, payments);
   return c.html(
     <PublicInvoice
       invoice={invoice}
@@ -80,7 +84,10 @@ pay.get('/:token', async (c) => {
       settings={settings}
       justPaid={c.req.query('paid') === '1'}
       canceled={c.req.query('canceled') === '1'}
-      providers={await providerAvailability(c.env, settings)}
+      underReview={underReview}
+      providers={
+        underReview ? { stripe: false, paypal: false } : await providerAvailability(c.env, settings, invoice.currency)
+      }
     />
   );
 });
@@ -120,7 +127,10 @@ pay.post('/:token/stripe', async (c) => {
   const invoice = await getInvoiceByToken(c.env.DB, c.req.param('token'));
   if (!invoice) return c.notFound();
   const settings = await getSettings(c.env.DB);
-  if (!(await providerAvailability(c.env, settings)).stripe) return c.redirect(`/pay/${invoice.public_token}`, 303);
+  if (awaitingPaymentReview(invoice, await getPayments(c.env.DB, invoice.id))) {
+    return c.redirect(`/pay/${invoice.public_token}`, 303);
+  }
+  if (!(await providerAvailability(c.env, settings, invoice.currency)).stripe) return c.redirect(`/pay/${invoice.public_token}`, 303);
   if (invoice.status === 'paid' || invoice.status === 'void' || invoice.total_cents <= 0) {
     return c.redirect(`/pay/${invoice.public_token}`, 303);
   }
@@ -136,7 +146,10 @@ pay.post('/:token/paypal', async (c) => {
   const invoice = await getInvoiceByToken(c.env.DB, c.req.param('token'));
   if (!invoice) return c.notFound();
   const settings = await getSettings(c.env.DB);
-  if (!(await providerAvailability(c.env, settings)).paypal) {
+  if (awaitingPaymentReview(invoice, await getPayments(c.env.DB, invoice.id))) {
+    return c.redirect(`/pay/${invoice.public_token}`, 303);
+  }
+  if (!(await providerAvailability(c.env, settings, invoice.currency)).paypal) {
     return c.redirect(`/pay/${invoice.public_token}`, 303);
   }
   if (invoice.status === 'paid' || invoice.status === 'void' || invoice.total_cents <= 0) {
