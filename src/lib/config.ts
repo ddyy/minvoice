@@ -2,6 +2,7 @@ import type { Bindings } from '../env';
 import type { Settings } from '../db/queries';
 import { authMode } from './admin-auth';
 import { effectiveProviderEnv, storedSecretsHealth } from './providers';
+import { validMasterKey } from './secretbox';
 
 // Example/template values that have historically leaked into real secrets
 // (one-click deploys prompt from .dev.vars.example) — never treat as configured.
@@ -39,9 +40,14 @@ export async function configWarnings(
 
   const secrets = await storedSecretsHealth(env, settings);
   if (secrets.undecryptable) {
-    push('payments', 'Stored API keys cannot be decrypted — SETTINGS_MASTER_KEY is missing or changed. Restore the original secret, or re-enter the keys in Settings.');
-  } else if (secrets.plaintextStored && !secretConfigured(env.SETTINGS_MASTER_KEY)) {
-    push('auth', 'API keys entered in Settings are stored unencrypted — set a SETTINGS_MASTER_KEY secret (`npm run deploy` generates one) to encrypt them at rest.');
+    push('payments', 'Stored API keys cannot be decrypted — SETTINGS_MASTER_KEY is missing, changed, or invalid. Restore the original secret, or re-enter the keys in Settings.');
+  } else if (secrets.plaintextStored && !validMasterKey(env.SETTINGS_MASTER_KEY)) {
+    push(
+      'auth',
+      (env.SETTINGS_MASTER_KEY ?? '').trim()
+        ? 'SETTINGS_MASTER_KEY is set but invalid (a known placeholder, or under 32 characters) — API keys entered in Settings stay unencrypted until it is replaced with a strong value.'
+        : 'API keys entered in Settings are stored unencrypted — set a SETTINGS_MASTER_KEY secret (`npm run deploy` generates one) to encrypt them at rest.'
+    );
   }
 
   if (settings.stripe_enabled) {

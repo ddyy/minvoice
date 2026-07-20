@@ -5,7 +5,7 @@ import { formatCents, isSupportedCurrency, parseAmountToCents } from '../lib/mon
 import { addDaysISO, isValidTimezone, todayInTz } from '../lib/dates';
 import { configWarnings, secretConfigured } from '../lib/config';
 import { accentUsable, safeAccent } from '../lib/color';
-import { encryptStoredSecrets, keySource } from '../lib/providers';
+import { effectiveProviderEnv, encryptStoredSecrets, keySource } from '../lib/providers';
 import { sealIfKeyed, unbox } from '../lib/secretbox';
 import { isLocalRequest } from '../lib/admin-auth';
 import { parseSchedule } from '../lib/reminders';
@@ -891,8 +891,10 @@ admin.post('/settings/email', async (c) => {
     body.email_provider === 'resend' ? 'resend' : body.email_provider === 'none' ? 'none' : 'cloudflare';
   // Resend without ANY key (submitted, stored, or env secret) would make every
   // email fail — keep the previous provider instead of saving a broken config.
+  // The stored key must actually DECRYPT (effectiveProviderEnv), not merely
+  // exist: undecryptable ciphertext is not a usable credential.
   const resendKeyAvailable =
-    secretConfigured(submittedKey) || secretConfigured(current.resend_api_key) || secretConfigured(c.env.RESEND_API_KEY);
+    secretConfigured(submittedKey) || !!(await effectiveProviderEnv(c.env, current)).RESEND_API_KEY;
   const resendKept = provider === 'resend' && !resendKeyAvailable;
   if (resendKept) provider = current.email_provider;
 

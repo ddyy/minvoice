@@ -115,22 +115,31 @@ describe('configWarnings', () => {
     expect(w[0].text).toContain('stored unencrypted');
   });
 
+  it('a placeholder or short master key counts as absent and is called out', async () => {
+    const env = { ...fullEnv, STRIPE_SECRET_KEY: '', SETTINGS_MASTER_KEY: 'change-me' } as unknown as Bindings;
+    const stored = { ...cf, stripe_secret_key: 'sk_live_db' } as Settings;
+    const w = await configWarnings(env, stored);
+    expect(w).toHaveLength(1);
+    expect(w[0].category).toBe('auth');
+    expect(w[0].text).toContain('set but invalid');
+  });
+
   it('boxed stored keys with the master key are silent', async () => {
-    const env = { ...fullEnv, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', SETTINGS_MASTER_KEY: 'mk' } as unknown as Bindings;
+    const env = { ...fullEnv, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', SETTINGS_MASTER_KEY: 'unit-test-master-key-0123456789abcdef' } as unknown as Bindings;
     const stored = {
       ...cf,
-      stripe_secret_key: await box('mk', 'sk_live_db'),
-      stripe_webhook_secret: await box('mk', 'whsec_db'),
+      stripe_secret_key: await box('unit-test-master-key-0123456789abcdef', 'sk_live_db'),
+      stripe_webhook_secret: await box('unit-test-master-key-0123456789abcdef', 'whsec_db'),
     } as Settings;
     expect(await configWarnings(env, stored)).toEqual([]);
   });
 
   it('flags undecryptable stored keys loudly', async () => {
-    const env = { ...fullEnv, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', SETTINGS_MASTER_KEY: 'rotated' } as unknown as Bindings;
+    const env = { ...fullEnv, STRIPE_SECRET_KEY: '', STRIPE_WEBHOOK_SECRET: '', SETTINGS_MASTER_KEY: 'a-different-master-key-fedcba9876543210' } as unknown as Bindings;
     const stored = {
       ...cf,
-      stripe_secret_key: await box('mk', 'sk_live_db'),
-      stripe_webhook_secret: await box('mk', 'whsec_db'),
+      stripe_secret_key: await box('unit-test-master-key-0123456789abcdef', 'sk_live_db'),
+      stripe_webhook_secret: await box('unit-test-master-key-0123456789abcdef', 'whsec_db'),
     } as Settings;
     const w = await configWarnings(env, stored);
     expect(w.some((m) => m.category === 'payments' && m.text.includes('cannot be decrypted'))).toBe(true);

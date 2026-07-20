@@ -43,27 +43,27 @@ describe('effectiveProviderEnv', () => {
   });
 
   it('decrypts a boxed stored key with the master key', async () => {
-    const boxed = await box('master', 'sk_live_boxed');
+    const boxed = await box('unit-test-master-key-0123456789abcdef', 'sk_live_boxed');
     const e = await effectiveProviderEnv(
-      env({ SETTINGS_MASTER_KEY: 'master' }),
+      env({ SETTINGS_MASTER_KEY: 'unit-test-master-key-0123456789abcdef' }),
       settings({ stripe_secret_key: boxed })
     );
     expect(e.STRIPE_SECRET_KEY).toBe('sk_live_boxed');
   });
 
   it('a boxed key is unconfigured when the master key is absent or wrong', async () => {
-    const boxed = await box('master', 'sk_live_boxed');
+    const boxed = await box('unit-test-master-key-0123456789abcdef', 'sk_live_boxed');
     const stored = settings({ stripe_secret_key: boxed });
     expect((await effectiveProviderEnv(env(), stored)).STRIPE_SECRET_KEY).toBeUndefined();
     expect(
-      (await effectiveProviderEnv(env({ SETTINGS_MASTER_KEY: 'rotated-wrong' }), stored)).STRIPE_SECRET_KEY
+      (await effectiveProviderEnv(env({ SETTINGS_MASTER_KEY: 'a-different-master-key-fedcba9876543210' }), stored)).STRIPE_SECRET_KEY
     ).toBeUndefined();
   });
 
   it('a boxed placeholder still never counts', async () => {
-    const boxed = await box('master', 'sk_test_xxx');
+    const boxed = await box('unit-test-master-key-0123456789abcdef', 'sk_test_xxx');
     const e = await effectiveProviderEnv(
-      env({ SETTINGS_MASTER_KEY: 'master' }),
+      env({ SETTINGS_MASTER_KEY: 'unit-test-master-key-0123456789abcdef' }),
       settings({ stripe_secret_key: boxed })
     );
     expect(e.STRIPE_SECRET_KEY).toBeUndefined();
@@ -92,7 +92,7 @@ describe('providerAvailability', () => {
   });
 
   it('an undecryptable boxed key makes the provider unavailable', async () => {
-    const boxed = await box('master', 'sk_live_x');
+    const boxed = await box('unit-test-master-key-0123456789abcdef', 'sk_live_x');
     expect((await providerAvailability(env(), settings({ stripe_secret_key: boxed }))).stripe).toBe(false);
   });
 });
@@ -117,6 +117,6 @@ describe('keySource', () => {
     expect(keySource(undefined, '')).toBe('none');
     expect(keySource('sk_test_xxx', '')).toBe('none');
     // boxed stored values still count as settings-provided
-    expect(keySource(undefined, await box('master', 'sk_live_x'))).toBe('settings');
+    expect(keySource(undefined, await box('unit-test-master-key-0123456789abcdef', 'sk_live_x'))).toBe('settings');
   });
 });

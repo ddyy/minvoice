@@ -2,7 +2,7 @@ import type { Bindings } from '../env';
 import type { Settings } from '../db/queries';
 import { setSecretSetting, SECRET_SETTINGS_COLUMNS } from '../db/queries';
 import { secretConfigured } from './config';
-import { box, isBoxed, unbox } from './secretbox';
+import { box, isBoxed, unbox, validMasterKey } from './secretbox';
 
 /**
  * Payment/email credentials can live in two places:
@@ -88,9 +88,10 @@ export async function storedSecretsHealth(env: Bindings, settings: Settings): Pr
  * page loads so existing deployments converge without a manual step.
  */
 export async function encryptStoredSecrets(db: D1Database, env: Bindings, settings: Settings): Promise<void> {
-  if (!env.SETTINGS_MASTER_KEY) return;
+  const key = validMasterKey(env.SETTINGS_MASTER_KEY);
+  if (!key) return;
   for (const col of SECRET_SETTINGS_COLUMNS) {
     const v = (settings[col] ?? '').trim();
-    if (v && !isBoxed(v)) await setSecretSetting(db, col, await box(env.SETTINGS_MASTER_KEY, v));
+    if (v && !isBoxed(v)) await setSecretSetting(db, col, await box(key, v));
   }
 }

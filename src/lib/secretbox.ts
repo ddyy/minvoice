@@ -7,8 +7,22 @@
  * master key keep working, and re-encrypt lazily once the key exists.
  */
 
+import { secretConfigured } from './config';
+
 const PREFIX = 'enc:v1:';
 const IV_BYTES = 12;
+
+export const MASTER_KEY_MIN_LENGTH = 32;
+
+/**
+ * A usable master key: not a known placeholder and long enough to carry real
+ * entropy. Anything else is treated as absent on EVERY path — encrypting with
+ * `change-me` would be worse than plaintext (publicly known key, warning gone).
+ */
+export function validMasterKey(v: string | undefined): string | undefined {
+  const t = (v ?? '').trim();
+  return t.length >= MASTER_KEY_MIN_LENGTH && secretConfigured(t) ? t : undefined;
+}
 
 export function isBoxed(v: string): boolean {
   return v.startsWith(PREFIX);
@@ -20,6 +34,7 @@ async function aesKey(masterKey: string): Promise<CryptoKey> {
 }
 
 export async function box(masterKey: string, plaintext: string): Promise<string> {
+  if (!validMasterKey(masterKey)) throw new Error('box() requires a valid SETTINGS_MASTER_KEY — callers must gate on validMasterKey()');
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const ct = new Uint8Array(
     await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await aesKey(masterKey), new TextEncoder().encode(plaintext))
@@ -37,12 +52,13 @@ export async function box(masterKey: string, plaintext: string): Promise<string>
  */
 export async function unbox(masterKey: string | undefined, stored: string): Promise<string | undefined> {
   if (!isBoxed(stored)) return stored;
-  if (!masterKey) return undefined;
+  const key = validMasterKey(masterKey);
+  if (!key) return undefined;
   try {
     const packed = Uint8Array.from(atob(stored.slice(PREFIX.length)), (c) => c.charCodeAt(0));
     const pt = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: packed.slice(0, IV_BYTES) },
-      await aesKey(masterKey),
+      await aesKey(key),
       packed.slice(IV_BYTES)
     );
     return new TextDecoder().decode(pt);
@@ -51,7 +67,8 @@ export async function unbox(masterKey: string | undefined, stored: string): Prom
   }
 }
 
-/** Encrypt when a master key is configured; store plaintext otherwise (legacy path). */
+/** Encrypt when a VALID master key is configured; store plaintext otherwise (legacy path). */
 export async function sealIfKeyed(masterKey: string | undefined, value: string): Promise<string> {
-  return masterKey && value ? box(masterKey, value) : value;
+  const key = validMasterKey(masterKey);
+  return key && value ? box(key, value) : value;
 }
