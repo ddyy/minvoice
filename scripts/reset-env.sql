@@ -11,6 +11,13 @@ DELETE FROM clients;
 DELETE FROM sqlite_sequence
 WHERE name IN ('invoice_events', 'payments', 'webhook_events', 'invoice_items', 'invoices', 'clients');
 
+-- A factory reset also revokes every MCP connection: registered OAuth clients,
+-- pending codes, and access/refresh tokens. (wipe-data.sql keeps them on
+-- purpose: it preserves business continuity, and grants belong to the owner.)
+DELETE FROM oauth_codes;
+DELETE FROM oauth_tokens;
+DELETE FROM oauth_clients;
+
 UPDATE settings SET
   business_name = '',
   business_address = '',
