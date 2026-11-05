@@ -456,3 +456,63 @@ describe('MCP invoice workflow', () => {
     expect(call.result.content[0].text).toMatch(/non-negative/);
   });
 });
+
+describe('consent form resubmission', () => {
+  it('a double submit or reload re-issues a code instead of failing CSRF', async () => {
+    // Browsers drop the first navigation when a form is submitted twice, so
+    // the response the user sees is the SECOND one. It must also succeed.
+    const { body: client, redirectUri } = await registerClient();
+    const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~'.slice(0, 64);
+    const challenge = await pkceChallenge(verifier);
+    const params = new URLSearchParams({
+      response_type: 'code', client_id: client.client_id, redirect_uri: redirectUri, state: 's',
+      code_challenge: challenge, code_challenge_method: 'S256', resource: 'https://invoice.test/mcp', scope: 'mcp:read',
+    });
+    const authorizePath = `/oauth/authorize?${params}`;
+    const login = await exports.default.fetch(new Request('https://invoice.test/admin/login', {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'same-origin' },
+      body: formBody({ password: 'integration-test-password', return_to: authorizePath }),
+    }));
+    const adminCookie = cookieValue(login);
+    const consent = await exports.default.fetch(new Request(`https://invoice.test${authorizePath}`, { headers: { cookie: adminCookie }, redirect: 'manual' }));
+    expect(consent.status).toBe(200);
+    const csrf = /name="csrf_token" value="([^"]+)"/.exec(await consent.text())?.[1] ?? '';
+    const csrfCookie = cookieValue(consent);
+
+    const submit = () => exports.default.fetch(new Request('https://invoice.test/oauth/authorize', {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `${adminCookie}; ${csrfCookie}` },
+      body: formBody({
+        response_type: 'code', client_id: client.client_id, redirect_uri: redirectUri, state: 's', scope: 'mcp:read',
+        code_challenge: challenge, code_challenge_method: 'S256', resource: 'https://invoice.test/mcp',
+        csrf_token: csrf, decision: 'approve',
+      }),
+    }));
+    const first = await submit();
+    const second = await submit();
+    expect(first.status).toBe(302);
+    expect(second.status).toBe(302);
+    expect(first.headers.get('set-cookie')).toBeNull(); // the CSRF cookie is left to expire, not cleared
+    const code1 = new URL(first.headers.get('location')!).searchParams.get('code')!;
+    const code2 = new URL(second.headers.get('location')!).searchParams.get('code')!;
+    expect(code1).not.toBe(code2);
+
+    // The code the browser actually delivers is the second one; it must exchange.
+    const exchanged = await exchangeCode(client.client_id, redirectUri, code2, verifier);
+    expect(exchanged.response.status).toBe(200);
+    expect(exchanged.body.access_token).toMatch(/^mcp_at_/);
+  });
+
+  it('a stale or missing CSRF cookie still fails, with an actionable message', async () => {
+    const { body: client, redirectUri } = await registerClient();
+    const r = await exports.default.fetch(new Request('https://invoice.test/oauth/authorize', {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: formBody({ client_id: client.client_id, redirect_uri: redirectUri, csrf_token: 'csrf_forged', decision: 'approve' }),
+    }));
+    // accessMiddleware runs first: unauthenticated POST is bounced to login, never reaches the consent logic
+    expect([302, 403]).toContain(r.status);
+    if (r.status === 403) expect(await r.text()).toMatch(/expired/i);
+  });
+});

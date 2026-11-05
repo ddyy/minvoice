@@ -408,7 +408,9 @@ oauth.get('/oauth/authorize', async (c) => {
 oauth.post('/oauth/authorize', async (c) => {
   const form = await c.req.formData();
   const csrf = String(form.get('csrf_token') ?? '');
-  if (!csrf || !(await timingSafeEqual(csrf, readCsrfCookie(c.req.raw)))) return c.text('CSRF validation failed', 403);
+  if (!csrf || !(await timingSafeEqual(csrf, readCsrfCookie(c.req.raw)))) {
+    return c.text('This authorization page has expired. Go back to your client and start the connection again.', 403);
+  }
   const url = new URL(c.req.url);
   for (const key of ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'resource', 'response_type']) {
     const value = form.get(key); if (typeof value === 'string') url.searchParams.set(key, value);
@@ -426,13 +428,16 @@ oauth.post('/oauth/authorize', async (c) => {
   const redirect = new URL(request.redirectUri);
   redirect.searchParams.set('code', code);
   if (request.state) redirect.searchParams.set('state', request.state);
+  // The CSRF cookie is deliberately NOT cleared here. Browsers abandon the
+  // first navigation when a form is submitted twice (double click, or a
+  // reload-and-resubmit after a slow loopback callback), so the 302 carrying
+  // the code is lost and only the second response is shown. With the cookie
+  // intact that second submit simply issues a fresh code; the unused one
+  // expires in CODE_TTL_SECONDS. The cookie cannot be read cross-site, so
+  // keeping it for its remaining lifetime grants nothing to an attacker.
   return new Response(null, {
     status: 302,
-    headers: {
-      Location: redirect.href,
-      'Set-Cookie': oauthCookie(c.req.raw, '', 0),
-      'Cache-Control': 'no-store',
-    },
+    headers: { Location: redirect.href, 'Cache-Control': 'no-store' },
   });
 });
 
