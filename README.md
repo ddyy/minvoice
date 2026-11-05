@@ -63,6 +63,9 @@ Everything beyond the Worker itself is optional:
 - **Your data stays yours** — books live in a D1 database in *your* Cloudflare account; no
   analytics, no tracking, no third-party requests on any page. Payment providers see only the
   charge itself, and clients' invoice pages are unindexed, unguessable URLs
+- **MCP automation** — an optional authenticated `/mcp` endpoint exposes clients, invoices,
+  payments, reports, and ordinary settings as tools; tools that send messages, change financial
+  state, or permanently delete data require an explicit confirmation argument
 - **Ledger design** — a warm, print-inspired design system (Fraunces + Instrument Sans,
   self-hosted); Lighthouse 100 performance and accessibility on the payment page, WCAG AA contrast
 
@@ -211,6 +214,7 @@ npx wrangler secret put PAYPAL_CLIENT_ID
 npx wrangler secret put PAYPAL_CLIENT_SECRET
 npx wrangler secret put PAYPAL_WEBHOOK_ID
 npx wrangler secret put RESEND_API_KEY          # if using Resend for email
+npx wrangler secret put MCP_API_TOKEN           # optional static-token fallback for /mcp
 npm run deploy
 ```
 
@@ -225,6 +229,59 @@ invoice-only deployment (no payment secrets yet) still produces shareable, print
 
 Visit `/admin`, complete the setup wizard, set the email From address in Settings, and send
 yourself a test invoice. The dashboard warns about any missing configuration.
+
+### MCP automation (optional)
+
+Minvoice includes a stateless MCP server at `https://yourhost/mcp` with OAuth 2.1 authorization.
+In an OAuth-capable MCP client, add that URL—the client discovers the authorization endpoints,
+registers itself, and opens a browser. Sign in with the same owner authentication as `/admin`,
+review the requested read/write scopes, and approve the connection. The client receives a
+one-hour access token and a rotating refresh token; raw tokens are never stored in D1.
+
+OAuth includes protected-resource and authorization-server discovery, dynamic client registration,
+exact redirect URI validation, PKCE-S256, audience binding to `/mcp`, consent CSRF protection,
+read/write scopes, refresh-token reuse detection, and revocation. It uses the existing D1 binding—no
+additional service, package, secret, or configuration is required.
+
+For a client that supports custom HTTP headers but not OAuth, optionally generate a static fallback:
+
+```sh
+openssl rand -hex 32
+npx wrangler secret put MCP_API_TOKEN
+npm run deploy
+```
+
+Then configure this request header:
+
+```text
+Authorization: Bearer <your MCP_API_TOKEN>
+```
+
+The server provides:
+
+- tools for business settings, client create/read/update/archive, invoice create/read/update/
+  duplicate/send/unsend/void/delete, manual-payment recording and correction, and reports;
+- resources for settings, clients, invoices, individual client/invoice records, and reports;
+- prompts for drafting invoices, reviewing receivables, and reconciling payments.
+
+OAuth access is scoped as `mcp:read` and `mcp:write`; requesting write automatically includes read.
+Secret provider credentials are never returned or writable through MCP. Emailing, bookkeeping
+changes, voiding, deleting, and other consequential tools require `confirm: true`; clients should
+only provide it after showing the proposed action and receiving explicit approval. Deleting an
+invoice erases its local payment records but never refunds Stripe or PayPal, and undoing a provider
+payment changes the books only—the provider refund remains a separate operation.
+
+Manage access under **Admin → Connections**. The page lists every dynamically registered client,
+its exact redirect URIs, authorization scopes, grant status, and refresh expiry. Revoke an
+individual grant to invalidate its complete access/refresh token family, or remove the client to
+delete its pending codes, tokens, and registration so it must register and receive consent again.
+The page also warns when the static-token fallback is configured, since that secret is not an OAuth
+grant and must be rotated or deleted with Wrangler.
+
+Treat OAuth grants and `MCP_API_TOKEN` as administrator access. Revoke an OAuth grant by calling
+`/oauth/revoke` from the client; a reused refresh token revokes its entire token family automatically.
+If you enable the fallback, use a unique random value, store it only as a Worker secret, rotate it
+if exposed, and do not place it in `wrangler.jsonc` or source control.
 
 ### Staging (optional, recommended)
 

@@ -6,6 +6,7 @@
   "assets": { "directory": "../public", "binding": "ASSETS" },
   "vars": {
     "ADMIN_PASSWORD": "integration-test-password",
+    "MCP_API_TOKEN": "integration-test-mcp-token",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
     "APP_BASE_URL": "https://invoice.test"

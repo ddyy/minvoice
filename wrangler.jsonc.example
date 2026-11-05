@@ -43,6 +43,9 @@
 
   // Staging: sandbox providers, separate D1, own hostname. Deploy with
   // `npm run deploy:test`. Bindings don't inherit — everything is respecified.
+  // OAuth needs no extra binding or secret. MCP_API_TOKEN is an optional
+  // static-token fallback for clients with custom-header support:
+  // npx wrangler secret put MCP_API_TOKEN [--env test]
   // Delete this block if you don't want a staging environment.
   "env": {
     "test": {

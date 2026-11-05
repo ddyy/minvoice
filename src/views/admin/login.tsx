@@ -1,7 +1,7 @@
 import { Layout } from '../layout';
 
 /** Password-mode login. Shown only when ADMIN_PASSWORD is set and Access isn't. */
-export function LoginPage({ error, loggedOut, lockedOut }: { error?: boolean; loggedOut?: boolean; lockedOut?: boolean }) {
+export function LoginPage({ error, loggedOut, lockedOut, returnTo }: { error?: boolean; loggedOut?: boolean; lockedOut?: boolean; returnTo?: string }) {
   return (
     <Layout title="Sign in" variant="public">
       <div class="pay-card card login-card">
@@ -12,6 +12,7 @@ export function LoginPage({ error, loggedOut, lockedOut }: { error?: boolean; lo
           <div class="banner banner-error mt-2">Too many failed attempts — try again in 15 minutes.</div>
         ) : null}
         <form method="post" action="/admin/login" class="mt-2">
+          {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
           <div class="form-group">
             <label for="password">Admin password</label>
             <input type="password" id="password" name="password" autofocus required autocomplete="current-password" />

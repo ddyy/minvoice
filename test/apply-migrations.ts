@@ -11,6 +11,7 @@ declare global {
     interface Env {
       TEST_MIGRATIONS: D1Migration[];
       ADMIN_PASSWORD: string;
+      MCP_API_TOKEN: string;
       ACCESS_TEAM_DOMAIN: string;
       ACCESS_AUD: string;
     }

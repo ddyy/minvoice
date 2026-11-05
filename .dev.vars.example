@@ -11,6 +11,10 @@
 # Also used to sign in during local dev (any value works there).
 ADMIN_PASSWORD=
 
+# ---- Optional MCP static-token fallback ----
+# OAuth works without this. Add only for clients that need a custom header.
+# MCP_API_TOKEN=
+
 # ---- Payments: add when ready ----
 # STRIPE_SECRET_KEY=
 # STRIPE_WEBHOOK_SECRET=

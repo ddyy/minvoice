@@ -58,6 +58,8 @@ import { PaymentsPage } from '../views/admin/payments';
 import { ReportsPage } from '../views/admin/reports';
 import { SettingsPage } from '../views/admin/settings';
 import { SetupPage } from '../views/admin/setup';
+import { ConnectionsPage } from '../views/admin/connections';
+import { listOAuthConnections, removeOAuthClient, revokeOAuthGrant } from './oauth';
 
 export const admin = new Hono<AppEnv>();
 
@@ -766,6 +768,47 @@ admin.get('/reports', async (c) => {
       clientId={clientId}
     />
   );
+});
+
+// ---------- Connections ----------
+
+function oauthIdentifier(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,100}$/.test(value) ? value : null;
+}
+
+admin.get('/connections', async (c) => {
+  const [connections, settings] = await Promise.all([
+    listOAuthConnections(c.env.DB),
+    getSettings(c.env.DB),
+  ]);
+  return c.html(
+    <ConnectionsPage
+      currentPath="/admin/connections"
+      connections={connections}
+      timezone={settings.timezone}
+      endpoint={`${c.env.APP_BASE_URL}/mcp`}
+      staticTokenConfigured={!!c.env.MCP_API_TOKEN}
+      revoked={c.req.query('revoked') === '1'}
+      removed={c.req.query('removed') === '1'}
+    />
+  );
+});
+
+admin.post('/connections/revoke', async (c) => {
+  const body = await c.req.parseBody();
+  const clientId = oauthIdentifier(body.client_id);
+  const familyId = oauthIdentifier(body.family_id);
+  if (!clientId || !familyId) return c.notFound();
+  if (!(await revokeOAuthGrant(c.env.DB, clientId, familyId))) return c.notFound();
+  return c.redirect('/admin/connections?revoked=1');
+});
+
+admin.post('/connections/remove', async (c) => {
+  const body = await c.req.parseBody();
+  const clientId = oauthIdentifier(body.client_id);
+  if (!clientId) return c.notFound();
+  if (!(await removeOAuthClient(c.env.DB, clientId))) return c.notFound();
+  return c.redirect('/admin/connections?removed=1');
 });
 
 // ---------- Settings ----------

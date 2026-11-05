@@ -1649,3 +1649,25 @@ html {
 .settings-alerts li:last-child {
   margin-bottom: 0;
 }
+
+/* OAuth connection management */
+.connection-card .page-head {
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+.connection-card h2,
+.connection-card h3 {
+  margin-top: 0;
+}
+.connection-uri-list {
+  margin: 0 0 1.25rem;
+  padding-left: 1.25rem;
+}
+.connection-uri-list li {
+  margin-bottom: 0.35rem;
+  overflow-wrap: anywhere;
+}
+.scope-code {
+  display: inline-block;
+  margin: 0.1rem 0.3rem 0.1rem 0;
+}

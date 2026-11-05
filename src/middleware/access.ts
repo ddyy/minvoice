@@ -19,10 +19,13 @@ let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
  */
 export const accessMiddleware = createMiddleware<AppEnv>(async (c, next) => {
   const mode = authMode(c.env);
+  const oauthReturn = c.req.path === '/oauth/authorize'
+    ? `/admin/login?return_to=${encodeURIComponent(new URL(c.req.url).pathname + new URL(c.req.url).search)}`
+    : null;
 
   if (mode === 'access') {
     const token = c.req.header('Cf-Access-Jwt-Assertion') ?? getCookie(c, 'CF_Authorization');
-    if (!token) return c.text('Forbidden', 403);
+    if (!token) return oauthReturn ? c.redirect(oauthReturn) : c.text('Forbidden', 403);
 
     jwks ??= createRemoteJWKSet(new URL(`https://${c.env.ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`));
     try {
@@ -31,14 +34,14 @@ export const accessMiddleware = createMiddleware<AppEnv>(async (c, next) => {
         audience: c.env.ACCESS_AUD,
       });
     } catch {
-      return c.text('Forbidden', 403);
+      return oauthReturn ? c.redirect(oauthReturn) : c.text('Forbidden', 403);
     }
     return next();
   }
 
   if (mode === 'password') {
     if (await verifySession(c.env.ADMIN_PASSWORD!, getCookie(c, SESSION_COOKIE))) return next();
-    return c.redirect('/admin/login');
+    return c.redirect(oauthReturn ?? '/admin/login');
   }
 
   return c.html(AuthSetupPage(), 403);

@@ -6,6 +6,8 @@ import { csrfGuard } from './middleware/csrf';
 import { admin } from './routes/admin';
 import { pay } from './routes/pay';
 import { webhooks } from './routes/webhooks';
+import { handleMcpRequest } from './routes/mcp';
+import { oauth, purgeExpiredOAuth } from './routes/oauth';
 import {
   clearLoginAttempts,
   getInvoice,
@@ -36,6 +38,16 @@ import { bodyLimit } from 'hono/body-limit';
 
 const app = new Hono<AppEnv>();
 
+function safeLoginReturn(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value.startsWith('/oauth/authorize?')) return undefined;
+  try {
+    const url = new URL(value, 'https://local.invalid');
+    return url.origin === 'https://local.invalid' && url.pathname === '/oauth/authorize' ? `${url.pathname}${url.search}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Zero-config base URL: when APP_BASE_URL isn't set (workers.dev / one-click
 // deploys), derive it per request so emails, checkout redirects, and PDF
 // links point at wherever the app is actually served.
@@ -65,9 +77,10 @@ app.use('/admin/*', csrfGuard);
 // reachable while signed out. In access mode they defer to Access entirely.
 app.get('/admin/login', (c) => {
   const mode = authMode(c.env);
-  if (mode === 'access') return c.redirect('/admin');
+  const returnTo = safeLoginReturn(c.req.query('return_to'));
+  if (mode === 'access') return c.redirect(returnTo ?? '/admin');
   if (mode === 'unconfigured') return c.html(<AuthSetupPage />, 403);
-  return c.html(<LoginPage loggedOut={c.req.query('out') === '1'} />);
+  return c.html(<LoginPage loggedOut={c.req.query('out') === '1'} returnTo={returnTo} />);
 });
 
 app.post('/admin/login', async (c) => {
@@ -78,11 +91,12 @@ app.post('/admin/login', async (c) => {
   // statement), so parallel requests each get a distinct count and can't all
   // observe a below-limit counter. Success clears the row.
   const ip = c.req.header('cf-connecting-ip') ?? 'local';
+  const body = await c.req.parseBody();
+  const returnTo = safeLoginReturn(body.return_to);
   if ((await recordLoginAttempt(c.env.DB, ip, LOGIN_WINDOW_MINUTES)) > LOGIN_MAX_ATTEMPTS) {
-    return c.html(<LoginPage lockedOut />, 429);
+    return c.html(<LoginPage lockedOut returnTo={returnTo} />, 429);
   }
 
-  const body = await c.req.parseBody();
   const password = typeof body.password === 'string' ? body.password : '';
   if (password && (await timingSafeEqual(password, c.env.ADMIN_PASSWORD!))) {
     c.executionCtx.waitUntil(clearLoginAttempts(c.env.DB, ip));
@@ -96,10 +110,10 @@ app.post('/admin/login', async (c) => {
       sameSite: 'Lax',
       expires: new Date(expiresAt),
     });
-    return c.redirect('/admin');
+    return c.redirect(returnTo ?? '/admin');
   }
   await new Promise((r) => setTimeout(r, 800)); // per-request friction on top of the counter
-  return c.html(<LoginPage error />, 401);
+  return c.html(<LoginPage error returnTo={returnTo} />, 401);
 });
 
 app.get('/admin/logout', (c) => {
@@ -122,6 +136,24 @@ app.get('/health', async (c) => {
     return c.text('unhealthy', 503);
   }
 });
+
+// OAuth discovery, dynamic registration, browser consent, token exchange,
+// refresh, and revocation. Authorization reuses the same owner login as admin.
+app.use(
+  '/oauth/*',
+  bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.text('Request body too large (64 KB limit).', 413) })
+);
+app.route('/', oauth);
+
+// Remote automation endpoint. OAuth access tokens are the normal path; the
+// optional static token is a fallback for clients with custom-header support.
+const mcpBodyLimit = bodyLimit({
+  maxSize: 1024 * 1024,
+  onError: (c) => c.text('Request body too large (1 MB limit).', 413),
+});
+app.use('/mcp', mcpBodyLimit);
+app.use('/mcp/', mcpBodyLimit);
+app.on(['POST', 'GET', 'DELETE', 'OPTIONS'], ['/mcp', '/mcp/'], (c) => handleMcpRequest(c.req.raw, c.env));
 
 // Uploaded business logo (public: appears on client-facing pages and emails).
 app.get('/logo', async (c) => {
@@ -186,6 +218,7 @@ export default {
         await processEmailOutbox(env);
         await purgeOldOutbox(env.DB, MAX_OUTBOX_ATTEMPTS);
         await purgeOldLoginAttempts(env.DB);
+        await purgeExpiredOAuth(env.DB);
       })()
     );
   },
