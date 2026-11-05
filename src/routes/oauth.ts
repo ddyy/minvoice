@@ -201,7 +201,13 @@ function consentHeaders(cookie: string): HeadersInit {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
     'Set-Cookie': cookie,
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    // No form-action directive on purpose: Chrome applies it to the whole
+    // redirect chain of a form submission, and approving the consent form
+    // answers with a 302 to the client's redirect_uri (a loopback URL for CLI
+    // clients), which would be blocked and leave the user on a dead page.
+    // The action is fixed server-side and no script can run here, so the
+    // directive would guard nothing.
+    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
     'X-Robots-Tag': 'noindex',

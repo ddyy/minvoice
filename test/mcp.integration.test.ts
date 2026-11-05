@@ -477,6 +477,10 @@ describe('consent form resubmission', () => {
     const adminCookie = cookieValue(login);
     const consent = await exports.default.fetch(new Request(`https://invoice.test${authorizePath}`, { headers: { cookie: adminCookie }, redirect: 'manual' }));
     expect(consent.status).toBe(200);
+    // Chrome enforces form-action on the post-submit redirect to the client's
+    // loopback redirect_uri; the consent CSP must never restrict it.
+    expect(consent.headers.get('content-security-policy')).not.toMatch(/form-action/);
+    expect(consent.headers.get('content-security-policy')).toMatch(/frame-ancestors 'none'/);
     const csrf = /name="csrf_token" value="([^"]+)"/.exec(await consent.text())?.[1] ?? '';
     const csrfCookie = cookieValue(consent);
 
