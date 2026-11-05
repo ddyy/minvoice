@@ -530,3 +530,84 @@ describe('awaitingPaymentReview', () => {
     void id;
   });
 });
+
+describe('inline client creation from the invoice form', () => {
+  beforeEach(async () => {
+    await DB.prepare('UPDATE settings SET setup_complete = 1 WHERE id = 1').run();
+  });
+
+  async function loginCookie(): Promise<string> {
+    const r = await exports.default.fetch(
+      new Request('https://invoice.test/admin/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'same-origin' },
+        body: 'password=integration-test-password',
+        redirect: 'manual',
+      })
+    );
+    return r.headers.get('set-cookie')?.split(';')[0] ?? '';
+  }
+
+  async function postNewInvoice(cookie: string, fields: Record<string, string>): Promise<Response> {
+    const body = new URLSearchParams(fields);
+    body.append('item_description[]', 'Design work');
+    body.append('item_quantity[]', '1');
+    body.append('item_unit_price[]', '100.00');
+    return exports.default.fetch(
+      new Request('https://invoice.test/admin/invoices/new', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'sec-fetch-site': 'same-origin', cookie },
+        body: body.toString(),
+        redirect: 'manual',
+      })
+    );
+  }
+
+  it('creates the client and files the invoice to it in one submit', async () => {
+    const cookie = await loginCookie();
+    const r = await postNewInvoice(cookie, {
+      client_id: '__new',
+      new_client_name: 'Inline Co',
+      new_client_email: 'ap@inline.test',
+      issue_date: '2026-07-01',
+      currency: 'USD',
+    });
+    expect(r.status).toBe(302);
+    const client = await DB.prepare("SELECT id, email FROM clients WHERE name = 'Inline Co'").first<{ id: number; email: string }>();
+    expect(client).toBeTruthy();
+    expect(client!.email).toBe('ap@inline.test');
+    const loc = r.headers.get('location')!;
+    const invId = Number(loc.split('/').pop());
+    const inv = await getInvoice(DB, invId);
+    expect(inv?.client_id).toBe(client!.id);
+  });
+
+  it('rejects a blank new-client name and creates nothing', async () => {
+    const cookie = await loginCookie();
+    const before = await DB.prepare('SELECT COUNT(*) AS n FROM clients').first<{ n: number }>();
+    const r = await postNewInvoice(cookie, {
+      client_id: '__new',
+      new_client_name: '   ',
+      issue_date: '2026-07-01',
+      currency: 'USD',
+    });
+    expect(r.status).toBe(400);
+    const after = await DB.prepare('SELECT COUNT(*) AS n FROM clients').first<{ n: number }>();
+    expect(after!.n).toBe(before!.n); // no orphaned client
+  });
+
+  it('does not orphan a client when other validation fails', async () => {
+    const cookie = await loginCookie();
+    const before = await DB.prepare('SELECT COUNT(*) AS n FROM clients').first<{ n: number }>();
+    // valid new client, but a zero-decimal currency (JPY) fails validation
+    const r = await postNewInvoice(cookie, {
+      client_id: '__new',
+      new_client_name: 'Should Not Persist',
+      issue_date: '2026-07-01',
+      currency: 'JPY',
+    });
+    expect(r.status).toBe(400);
+    const after = await DB.prepare('SELECT COUNT(*) AS n FROM clients').first<{ n: number }>();
+    expect(after!.n).toBe(before!.n);
+  });
+});

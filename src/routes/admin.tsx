@@ -218,6 +218,28 @@ async function invoiceHeaderProblems(
   return problems;
 }
 
+/** Sentinel client_id from the invoice form's "+ New client…" option. */
+const NEW_CLIENT_SENTINEL = '__new';
+const wantsInlineClient = (body: Record<string, string | string[]>): boolean =>
+  str(body.client_id) === NEW_CLIENT_SENTINEL;
+
+/** Validation for the inline new-client fields (name required, email optional). */
+function inlineClientProblems(body: Record<string, string | string[]>): string[] {
+  if (!wantsInlineClient(body)) return [];
+  return str(body.new_client_name).trim() ? [] : ['New client name is required.'];
+}
+
+/** Create the inline client and return its id. Call only after all validation passes. */
+async function createInlineClient(db: D1Database, body: Record<string, string | string[]>): Promise<number> {
+  return createClient(db, {
+    name: str(body.new_client_name).trim(),
+    email: str(body.new_client_email).trim() || null,
+    address: null,
+    default_rate_cents: null,
+    payment_terms_days: null,
+  });
+}
+
 function str(v: string | string[] | undefined): string {
   if (Array.isArray(v)) return v[0] ?? '';
   return v ?? '';
@@ -279,6 +301,8 @@ admin.post('/invoices/new', async (c) => {
         formValues={{
           number: str(body.number),
           client_id: str(body.client_id),
+          new_client_name: str(body.new_client_name),
+          new_client_email: str(body.new_client_email),
           issue_date: str(body.issue_date),
           due_date: str(body.due_date),
           currency: str(body.currency),
@@ -292,7 +316,11 @@ admin.post('/invoices/new', async (c) => {
       400
     );
 
-  const problems = [...(await invoiceHeaderProblems(c.env.DB, body, { checkClient: true })), ...itemProblems];
+  const problems = [
+    ...(await invoiceHeaderProblems(c.env.DB, body, { checkClient: !wantsInlineClient(body) })),
+    ...inlineClientProblems(body),
+    ...itemProblems,
+  ];
 
   // Blank or untouched number -> auto counter; anything else is a custom number.
   const typedNumber = str(body.number).trim();
@@ -301,7 +329,9 @@ admin.post('/invoices/new', async (c) => {
     problems.push(`Invoice number "${customNumber}" is already in use.`);
   }
   if (problems.length) return rerender(problems);
-  const clientId = Number(str(body.client_id));
+  // Create the inline client only now that everything else validated, so a
+  // failed submit never leaves an orphaned client behind.
+  const clientId = wantsInlineClient(body) ? await createInlineClient(c.env.DB, body) : Number(str(body.client_id));
 
   try {
     const invoiceId = await createInvoice(
@@ -400,7 +430,11 @@ admin.post('/invoices/:id/edit', async (c) => {
 
   const body = (await c.req.parseBody({ all: true })) as Record<string, string | string[]>;
   const { items, problems: itemProblems } = parseItemDrafts(body);
-  const problems = [...(await invoiceHeaderProblems(c.env.DB, body, { checkClient: true })), ...itemProblems];
+  const problems = [
+    ...(await invoiceHeaderProblems(c.env.DB, body, { checkClient: !wantsInlineClient(body) })),
+    ...inlineClientProblems(body),
+    ...itemProblems,
+  ];
 
   if (problems.length) {
     const [clients, settings] = await Promise.all([listClients(c.env.DB), getSettings(c.env.DB)]);
@@ -413,6 +447,8 @@ admin.post('/invoices/:id/edit', async (c) => {
         errors={problems}
         formValues={{
           client_id: str(body.client_id),
+          new_client_name: str(body.new_client_name),
+          new_client_email: str(body.new_client_email),
           issue_date: str(body.issue_date),
           due_date: str(body.due_date),
           currency: str(body.currency),
@@ -427,8 +463,10 @@ admin.post('/invoices/:id/edit', async (c) => {
     );
   }
 
+  // Create the inline client only after validation, so a bad submit can't orphan one.
+  const clientId = wantsInlineClient(body) ? await createInlineClient(c.env.DB, body) : Number(str(body.client_id));
   await updateInvoice(c.env.DB, id, {
-    client_id: Number(str(body.client_id)),
+    client_id: clientId,
     issue_date: str(body.issue_date),
     due_date: str(body.due_date) || null,
     subject: str(body.subject).trim() || null,

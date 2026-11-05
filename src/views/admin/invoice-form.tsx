@@ -16,6 +16,8 @@ export type InvoiceFormProps = {
   formValues?: {
     number?: string;
     client_id?: string;
+    new_client_name?: string;
+    new_client_email?: string;
     issue_date?: string;
     due_date?: string;
     currency?: string;
@@ -27,6 +29,9 @@ export type InvoiceFormProps = {
   };
 };
 
+
+/** Sentinel client_id value that switches the form into "create a new client" mode. */
+const NEW_CLIENT = '__new';
 
 /** Effective default rate for a client as a "150.00" input value, or '' when none. */
 function effectiveRate(client: Client, settings: Settings): string {
@@ -46,22 +51,11 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
   const title = isEdit ? `Edit invoice ${invoice!.number}` : 'New invoice';
   const actionUrl = isEdit ? `/admin/invoices/${invoice!.id}/edit` : '/admin/invoices/new';
 
-  if (!isEdit && clients.length === 0) {
-    return (
-      <Layout title={title} currentPath={currentPath}>
-        <div class="page-head">
-          <h1 class="page-title">New invoice</h1>
-        </div>
-        <div class="banner banner-error">
-          You need at least one client before you can create an invoice.{' '}
-          <a href="/admin/clients/new">Add a client</a>.
-        </div>
-      </Layout>
-    );
-  }
-
   const fv = props.formValues;
-  const selectedClientId = fv?.client_id ?? (invoice ? String(invoice.client_id) : '');
+  // No clients yet? Open in "new client" mode instead of dead-ending.
+  const selectedClientId =
+    fv?.client_id ?? (invoice ? String(invoice.client_id) : clients.length === 0 ? NEW_CLIENT : '');
+  const newClientMode = selectedClientId === NEW_CLIENT;
   const issueDate = fv?.issue_date ?? invoice?.issue_date ?? todayInTz(settings.timezone);
   const dueDate = fv?.due_date ?? invoice?.due_date ?? '';
   const currency = fv?.currency ?? invoice?.currency ?? settings.currency;
@@ -127,6 +121,9 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
                 <option value="" disabled selected={!selectedClientId}>
                   Select a client
                 </option>
+                <option value={NEW_CLIENT} selected={newClientMode}>
+                  + New client…
+                </option>
                 {clients.map((client) => (
                   <option
                     value={String(client.id)}
@@ -138,6 +135,32 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
                   </option>
                 ))}
               </select>
+            </div>
+          </div>
+
+          {/* Revealed by the client select when "+ New client…" is chosen; the
+              client is created on submit, then the invoice is filed to it. */}
+          <div class="form-row" id="new-client-fields" hidden={!newClientMode}>
+            <div class="form-group">
+              <label for="new_client_name">New client name</label>
+              <input
+                type="text"
+                id="new_client_name"
+                name="new_client_name"
+                value={fv?.new_client_name ?? ''}
+                autocomplete="off"
+              />
+            </div>
+            <div class="form-group">
+              <label for="new_client_email">New client email</label>
+              <input
+                type="email"
+                id="new_client_email"
+                name="new_client_email"
+                value={fv?.new_client_email ?? ''}
+                autocomplete="off"
+              />
+              <span class="muted">Optional. Needed later to email this invoice.</span>
             </div>
           </div>
 
@@ -331,7 +354,20 @@ export function InvoiceFormPage(props: InvoiceFormProps) {
     });
   }
 
+  // Reveal the inline new-client fields when "+ New client…" is selected, and
+  // only require the name while they're visible (so existing-client submits work).
+  var newClientFields = document.getElementById('new-client-fields');
+  var newClientName = document.getElementById('new_client_name');
+  function toggleNewClient() {
+    var on = clientSelect.value === '${NEW_CLIENT}';
+    newClientFields.hidden = !on;
+    newClientName.required = on;
+    if (on) newClientName.focus();
+  }
+  toggleNewClient();
+
   clientSelect.addEventListener('change', function () {
+    toggleNewClient();
     applyRate();
     updateRateHint();
     applyTerms();
